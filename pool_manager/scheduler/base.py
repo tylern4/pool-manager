@@ -1,0 +1,51 @@
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+
+
+class JobState(Enum):
+    RUNNING = "running"
+    PENDING = "pending"
+    DRAINING = "draining"
+    EXITED = "exited"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class JobInfo:
+    job_id: str
+    state: JobState
+
+
+class SchedulerBackend(ABC):
+    @abstractmethod
+    def submit(self, script_path: str, submit_args: dict[str, str]) -> str: ...
+
+    @abstractmethod
+    def cancel(self, job_id: str) -> None: ...
+
+    @abstractmethod
+    def list_active(self) -> list[JobInfo]: ...
+
+    @abstractmethod
+    def signal(self, job_id: str, sig: str) -> None: ...
+
+    @abstractmethod
+    def name(self) -> str: ...
+
+
+class HPCScheduler(ABC):
+    @abstractmethod
+    def submit(self, script_path: str, submit_args: dict[str, str]) -> str: ...
+
+    @abstractmethod
+    def cancel(self, job_id: str) -> None: ...
+
+    @abstractmethod
+    def list_active(self) -> list[JobInfo]: ...
+
+    @abstractmethod
+    def signal(self, job_id: str, sig: str) -> None: ...
+
+    @abstractmethod
+    def name(self) -> str: ...

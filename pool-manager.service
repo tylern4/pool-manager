@@ -1,0 +1,16 @@
+[Unit]
+Description=Pool Manager — HTCondor to HPC scheduler bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pool-manager --config /etc/pool-manager/pool-manager.yaml
+Restart=on-failure
+RestartSec=10
+User=poolmgr
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

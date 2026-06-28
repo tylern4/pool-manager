@@ -1,0 +1,33 @@
+# Pool Manager Configuration
+poll_interval: 15
+log_level: INFO
+
+# Scaling policy
+scaling:
+  min_workers: 0
+  max_workers: 16
+  batch_size: 1
+  scale_up_cooldown: 30
+  scale_down_cooldown: 60
+  drain_timeout: 120
+
+# Work queue (HTCondor) configuration
+work_queue:
+  backend: condor_python        # condor_python | condor_subprocess | condor_rest
+  schedd_name: ""               # leave empty for default schedd
+  constraint: "JobStatus == 1"  # only count idle jobs
+  rest_url: ""                  # required for condor_rest backend
+
+# HPC scheduler configuration
+scheduler:
+  backend: slurm_subprocess     # slurm_subprocess | slurm_rest | pbs_subprocess | local_subprocess
+  worker_script: /path/to/htcondor_worker.sh
+  rest_url: ""
+  rest_token: ""
+  # These are passed as --key=value to sbatch (or -key value to qsub)
+  submit_args:
+    partition: defq
+    account: myproject
+    time: "08:00:00"
+    nodes: 1
+    ntasks: 1
