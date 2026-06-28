@@ -1,6 +1,7 @@
 import logging
 
 from pool_manager.log import TRACE
+from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend
 
 log = logging.getLogger("pool_manager.work_queue.condor_rest")
@@ -12,13 +13,19 @@ class CondorRESTAPIBackend(CondorBackend):
         self._token = token
 
     def count_idle(self, constraint: str = "JobStatus == 1") -> int:
+        return len(self.list_idle(constraint=constraint))
+
+    def list_idle(self, constraint: str = "JobStatus == 1") -> list[TaskResources]:
         import httpx
 
         headers = {}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
 
-        params = {"constraint": constraint, "projection": "ClusterId"}
+        params = {
+            "constraint": constraint,
+            "projection": "ClusterId,RequestCpus,RequestMemory,RequestGpus",
+        }
         url = f"{self._url}/v1/jobs"
 
         log.debug("GET %s with params: %s", url, params)
@@ -27,9 +34,17 @@ class CondorRESTAPIBackend(CondorBackend):
 
         resp.raise_for_status()
         data = resp.json()
-        count = len(data.get("data", data.get("jobs", [])))
-        log.debug("HTCondor REST idle count: %d", count)
-        return count
+        jobs = data.get("data", data.get("jobs", []))
+        tasks = [
+            TaskResources(
+                cpus=float(job.get("RequestCpus", 1) or 1),
+                memory_mb=int(job.get("RequestMemory", 1024) or 1024),
+                gpus=int(job.get("RequestGpus", 0) or 0),
+            )
+            for job in jobs
+        ]
+        log.debug("HTCondor REST idle count: %d", len(tasks))
+        return tasks
 
     def name(self) -> str:
         return f"condor_rest({self._url})"

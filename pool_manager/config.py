@@ -4,6 +4,7 @@ from typing import Any
 
 import yaml
 
+from pool_manager.placement import NodeConfig, TaskResources
 from pool_manager.scaling import ScalingPolicy
 
 
@@ -20,8 +21,14 @@ class SchedulerConfig:
     backend: str = "slurm_subprocess"
     worker_script: str = ""
     submit_args: dict[str, Any] = field(default_factory=dict)
+    node_configs: list[NodeConfig] = field(default_factory=list)
     rest_url: str = ""
     rest_token: str = ""
+    machine: str = ""
+    sfapi_client_id: str = ""
+    sfapi_client_secret: str = ""
+    sfapi_key_path: str = ""
+    sfapi_user: str = ""
 
 
 @dataclass
@@ -47,6 +54,24 @@ class Config:
         sch = raw.get("scheduler", {})
         sc = raw.get("scaling", {})
 
+        node_configs_raw: Any = sch.get("node_configs", [])
+        node_configs = [
+            NodeConfig(
+                name=n.get("name", ""),
+                cpus=int(n.get("cpus", 1)),
+                memory_mb=int(n.get("memory_mb", 1024)),
+                gpus=int(n.get("gpus", 0)),
+            )
+            for n in node_configs_raw
+        ]
+
+        task_res_raw = sc.get("task_resources", {})
+        task_resources = TaskResources(
+            cpus=float(task_res_raw.get("cpus", 1.0)),
+            memory_mb=int(task_res_raw.get("memory_mb", 1024)),
+            gpus=int(task_res_raw.get("gpus", 0)),
+        )
+
         return cls(
             poll_interval=raw.get("poll_interval", 15.0),
             log_level=raw.get("log_level", "INFO"),
@@ -60,8 +85,14 @@ class Config:
                 backend=sch.get("backend", "slurm_subprocess"),
                 worker_script=sch.get("worker_script", ""),
                 submit_args=sch.get("submit_args", {}),
+                node_configs=node_configs,
                 rest_url=sch.get("rest_url", ""),
                 rest_token=sch.get("rest_token", ""),
+                machine=sch.get("machine", ""),
+                sfapi_client_id=sch.get("sfapi_client_id", ""),
+                sfapi_client_secret=sch.get("sfapi_client_secret", ""),
+                sfapi_key_path=sch.get("sfapi_key_path", ""),
+                sfapi_user=sch.get("sfapi_user", ""),
             ),
             scaling=ScalingPolicy(
                 min_workers=sc.get("min_workers", 0),
@@ -70,5 +101,6 @@ class Config:
                 scale_up_cooldown=sc.get("scale_up_cooldown", 30.0),
                 scale_down_cooldown=sc.get("scale_down_cooldown", 60.0),
                 drain_timeout=sc.get("drain_timeout", 120.0),
+                task_resources=task_resources,
             ),
         )

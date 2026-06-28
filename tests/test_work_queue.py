@@ -1,3 +1,4 @@
+from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend, WorkQueue
 from pool_manager.work_queue.condor import CondorWorkQueue
 
@@ -10,6 +11,10 @@ class _FakeCondorBackend(CondorBackend):
     def count_idle(self, constraint: str = "") -> int:
         self.called_with_constraint = constraint
         return self._count
+
+    def list_idle(self, constraint: str = "JobStatus == 1") -> list[TaskResources]:
+        self.called_with_constraint = constraint
+        return [TaskResources() for _ in range(self._count)]
 
     def name(self) -> str:
         return "fake_backend"

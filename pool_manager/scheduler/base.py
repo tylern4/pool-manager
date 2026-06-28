@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -15,6 +17,14 @@ class JobState(Enum):
 class JobInfo:
     job_id: str
     state: JobState
+
+
+@dataclass
+class NodeConfig:
+    name: str
+    cpus: int = 1
+    memory_mb: int = 1024
+    gpus: int = 0
 
 
 class SchedulerBackend(ABC):

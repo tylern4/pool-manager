@@ -5,11 +5,16 @@ log_level: INFO
 # Scaling policy
 scaling:
   min_workers: 0
-  max_workers: 16
+  max_workers: 10
   batch_size: 1
   scale_up_cooldown: 30
   scale_down_cooldown: 60
   drain_timeout: 120
+  # Resource requirements per task (used when node_configs are defined)
+  task_resources:
+    cpus: 1
+    memory_mb: 2000
+    gpus: 0
 
 # Work queue (HTCondor) configuration
 work_queue:
@@ -20,10 +25,27 @@ work_queue:
 
 # HPC scheduler configuration
 scheduler:
-  backend: slurm_subprocess     # slurm_subprocess | slurm_rest | pbs_subprocess | local_subprocess
+  backend: slurm_subprocess     # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess | local_subprocess | htcondor_rest
   worker_script: /path/to/htcondor_worker.sh
   rest_url: ""
   rest_token: ""
+  machine: ""                   # required for slurm_sfapi (e.g., "perlmutter")
+  sfapi_client_id: ""           # for slurm_sfapi auth
+  sfapi_client_secret: ""       # for slurm_sfapi auth (JWK JSON string)
+  sfapi_key_path: ""            # alternate auth: path to key file
+  sfapi_user: ""                # username to filter jobs (default: all)
+  # Node configurations for placement-aware scheduling.
+  # When defined, the pool manager chooses the minimum number of nodes
+  # to fit all idle tasks based on their resource requirements.
+  node_configs:
+    - name: small
+      cpus: 4
+      memory_mb: 8000
+      gpus: 0
+    - name: large
+      cpus: 16
+      memory_mb: 64000
+      gpus: 0
   # These are passed as --key=value to sbatch (or -key value to qsub)
   submit_args:
     partition: defq

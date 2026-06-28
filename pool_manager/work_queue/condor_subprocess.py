@@ -1,8 +1,10 @@
+import json
 import logging
 import shlex
 import subprocess
 
 from pool_manager.log import TRACE
+from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend
 
 log = logging.getLogger("pool_manager.work_queue.condor_subprocess")
@@ -12,34 +14,47 @@ class CondorSubprocessBackend(CondorBackend):
     def __init__(self, schedd_name: str = ""):
         self._schedd_name = schedd_name
 
-    def count_idle(self, constraint: str = "JobStatus == 1") -> int:
-        cmd = ["condor_q"]
+    def _query_json(self, constraint: str) -> list[dict]:
+        cmd = ["condor_q", "-json"]
         if self._schedd_name:
             cmd.extend(["-pool", self._schedd_name])
-        cmd.extend(["-constraint", constraint, "-total"])
+        cmd.extend(["-constraint", constraint])
 
         log.debug("Running condor_q command: %s", shlex.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        log.log(TRACE, "condor_q stdout: %s", result.stdout.strip())
+        log.log(TRACE, "condor_q stdout (first 2000): %s", result.stdout[:2000])
         log.log(TRACE, "condor_q stderr: %s", result.stderr.strip())
 
         if result.returncode != 0:
             log.warning("condor_q exited %d: %s", result.returncode, result.stderr.strip())
-            return 0
+            return []
 
-        import re
+        if not result.stdout.strip():
+            return []
 
-        for line in result.stdout.strip().splitlines():
-            if line.strip().startswith("0 jobs"):
-                return 0
-            m = re.search(r"(\d+)\s+idle", line)
-            if m:
-                count = int(m.group(1))
-                log.debug("Parsed idle count: %d", count)
-                return count
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            log.warning("Failed to parse condor_q JSON output: %s", e)
+            return []
 
-        log.warning("Could not parse idle count from condor_q output")
-        return 0
+    def count_idle(self, constraint: str = "JobStatus == 1") -> int:
+        jobs = self._query_json(constraint)
+        return len(jobs)
+
+    def list_idle(self, constraint: str = "JobStatus == 1") -> list[TaskResources]:
+        jobs = self._query_json(constraint)
+        tasks = []
+        for job in jobs:
+            tasks.append(
+                TaskResources(
+                    cpus=float(job.get("RequestCpus", 1) or 1),
+                    memory_mb=int(job.get("RequestMemory", 1024) or 1024),
+                    gpus=int(job.get("RequestGpus", 0) or 0),
+                )
+            )
+        log.debug("Parsed %d idle job(s) with task resources", len(tasks))
+        return tasks
 
     def name(self) -> str:
         base = "condor_subprocess"
