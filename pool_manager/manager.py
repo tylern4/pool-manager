@@ -3,7 +3,7 @@ import signal
 import time
 
 from pool_manager.config import Config
-from pool_manager.placement import Placement, PlacementPlanner
+from pool_manager.placement import Placement, PlacementPlanner, TaskResources
 from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState
 from pool_manager.work_queue.base import WorkQueue
 
@@ -116,12 +116,8 @@ class PoolManager:
         )
         if self._has_node_configs:
             log.info(
-                "Node-aware placement: %d node config(s), "
-                "task_resources=(cpus=%.1f mem=%dMB gpus=%d)",
+                "Node-aware placement: %d node config(s), resources from condor_q per task",
                 len(self._config.scheduler.node_configs),
-                self._policy.task_resources.cpus,
-                self._policy.task_resources.memory_mb,
-                self._policy.task_resources.gpus,
             )
 
         while self._running:
@@ -140,18 +136,20 @@ class PoolManager:
         log.info("Pool manager stopped")
 
     def _tick(self):
-        idle_count = self._wq.count_idle()
-        target = self._planner.target_size(idle_count)
+        tasks = self._wq.list_idle()
+        plan = self._planner.plan_for_tasks(tasks)
+        target = sum(p.count for p in plan)
+        target = max(self._policy.min_workers, min(self._policy.max_workers, target))
         log.debug(
             "Tick: idle=%d target=%d active=%d draining=%d",
-            idle_count,
+            len(tasks),
             target,
             self._active_count(),
             self._draining_count(),
         )
 
         self._reconcile()
-        self._scale(idle_count, target)
+        self._scale(tasks, plan, target)
 
     def _reconcile(self):
         active = self._sched.list_active()
@@ -182,7 +180,7 @@ class PoolManager:
             self._tracked[jid] = JobInfo(job_id=jid, state=JobState.EXITED)
             self._node_assignments.pop(jid, None)
 
-    def _scale(self, idle_count: int, target: int):
+    def _scale(self, tasks: list[TaskResources], plan: list[Placement], target: int):
         active = self._active_count()
         now = time.monotonic()
 
@@ -192,7 +190,7 @@ class PoolManager:
                 return
             to_add = target - active
             log.debug("Scaling UP: adding %d workers (target=%d active=%d)", to_add, target, active)
-            self._start_workers(idle_count, to_add)
+            self._start_workers(plan, to_add)
             self._last_scale_up = now
             self._drain_start = None
 
@@ -201,7 +199,7 @@ class PoolManager:
                 if self._drain_start is None:
                     log.debug(
                         "Idle count %d below target %d; starting scale-down cooldown",
-                        idle_count,
+                        len(tasks),
                         target,
                     )
                     self._drain_start = now + self._policy.scale_down_cooldown
@@ -213,7 +211,7 @@ class PoolManager:
             log.debug(
                 "Scaling DOWN: removing %d workers (target=%d active=%d)", excess, target, active
             )
-            self._signal_workers(excess, idle_count=idle_count)
+            self._signal_workers(excess, plan=plan)
             self._last_scale_down = now
 
             if self._draining_count() > 0 and self._policy.drain_timeout > 0:
@@ -224,14 +222,13 @@ class PoolManager:
         elif self._daemon_shutdown:
             self._drain_all()
 
-    def _start_workers(self, idle_count: int, count: int):
+    def _start_workers(self, plan: list[Placement], count: int):
         if self._has_node_configs:
-            placements = self._planner.plan(idle_count)
-            self._start_workers_from_plan(placements, count)
+            self._start_workers_from_plan(plan, count)
         else:
             self._start_workers_simple(count)
 
-    def _signal_workers(self, count: int, idle_count: int = 0):
+    def _signal_workers(self, count: int, plan: list[Placement] | None = None):
         active = sorted(
             jid
             for jid, ji in self._tracked.items()
@@ -240,9 +237,7 @@ class PoolManager:
         if count <= 0 or not active:
             return
 
-        if self._has_node_configs and idle_count >= 0:
-            plan = self._planner.plan(idle_count)
-
+        if self._has_node_configs and plan is not None:
             desired: dict[str, int] = {}
             for p in plan:
                 desired[p.node_config.name] = desired.get(p.node_config.name, 0) + p.count
@@ -340,7 +335,8 @@ class PoolManager:
         if active == 0:
             log.info("No active workers to drain")
             return
-        self._signal_workers(active)
+        plan = self._planner.plan_for_tasks([])
+        self._signal_workers(active, plan=plan)
         deadline = time.monotonic() + self._policy.drain_timeout
         while time.monotonic() < deadline:
             self._reconcile()

@@ -10,11 +10,6 @@ scaling:
   scale_up_cooldown: 30
   scale_down_cooldown: 60
   drain_timeout: 120
-  # Resource requirements per task (used when node_configs are defined)
-  task_resources:
-    cpus: 1
-    memory_mb: 2000
-    gpus: 0
 
 # Work queue (HTCondor) configuration
 work_queue:

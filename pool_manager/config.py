@@ -4,7 +4,7 @@ from typing import Any
 
 import yaml
 
-from pool_manager.placement import NodeConfig, TaskResources
+from pool_manager.placement import NodeConfig
 from pool_manager.scaling import ScalingPolicy
 
 
@@ -65,13 +65,6 @@ class Config:
             for n in node_configs_raw
         ]
 
-        task_res_raw = sc.get("task_resources", {})
-        task_resources = TaskResources(
-            cpus=float(task_res_raw.get("cpus", 1.0)),
-            memory_mb=int(task_res_raw.get("memory_mb", 1024)),
-            gpus=int(task_res_raw.get("gpus", 0)),
-        )
-
         return cls(
             poll_interval=raw.get("poll_interval", 15.0),
             log_level=raw.get("log_level", "INFO"),
@@ -101,6 +94,5 @@ class Config:
                 scale_up_cooldown=sc.get("scale_up_cooldown", 30.0),
                 scale_down_cooldown=sc.get("scale_down_cooldown", 60.0),
                 drain_timeout=sc.get("drain_timeout", 120.0),
-                task_resources=task_resources,
             ),
         )

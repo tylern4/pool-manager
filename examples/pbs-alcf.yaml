@@ -11,10 +11,7 @@ scaling:
   scale_up_cooldown: 30
   scale_down_cooldown: 60
   drain_timeout: 120
-  task_resources:
-    cpus: 1
-    memory_mb: 2000
-    gpus: 0
+  # Task resources are read from condor_q (RequestCpus, RequestMemory, RequestGpus) per job.
 
 work_queue:
   backend: condor_subprocess

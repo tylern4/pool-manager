@@ -4,7 +4,7 @@ import pytest
 
 from pool_manager.config import Config, SchedulerConfig, WorkQueueConfig
 from pool_manager.manager import PoolManager
-from pool_manager.placement import NodeConfig, TaskResources
+from pool_manager.placement import NodeConfig, Placement, TaskResources
 from pool_manager.scaling import ScalingPolicy
 from pool_manager.scheduler.base import JobInfo, JobState
 
@@ -21,22 +21,23 @@ def mock_scheduler():
 @pytest.fixture
 def mock_work_queue():
     wq = MagicMock()
-    wq.count_idle.return_value = 5
+    wq.list_idle.return_value = [
+        TaskResources(cpus=1, memory_mb=1024, gpus=0),
+        TaskResources(cpus=1, memory_mb=1024, gpus=0),
+        TaskResources(cpus=1, memory_mb=1024, gpus=0),
+        TaskResources(cpus=1, memory_mb=1024, gpus=0),
+        TaskResources(cpus=1, memory_mb=1024, gpus=0),
+    ]
     wq.name.return_value = "test_queue"
     return wq
 
 
-def make_config(node_configs=None, task_resources=None, **overrides):
+def make_config(node_configs=None, **overrides):
     sc = overrides.get("scaling", {})
     policy = ScalingPolicy(
         min_workers=sc.get("min_workers", 0),
         max_workers=sc.get("max_workers", 16),
         batch_size=sc.get("batch_size", 1),
-        task_resources=TaskResources(
-            cpus=task_resources.get("cpus", 1) if task_resources else 1,
-            memory_mb=task_resources.get("memory_mb", 1024) if task_resources else 1024,
-            gpus=task_resources.get("gpus", 0) if task_resources else 0,
-        ),
     )
     return Config(
         poll_interval=0.1,
@@ -69,7 +70,8 @@ class TestManagerPlacement:
     def test_start_workers_simple_no_configs(self, mock_scheduler, mock_work_queue):
         cfg = make_config()
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
-        mgr._start_workers(5, 3)
+        plan = [Placement(node_config=NodeConfig(name="default"), count=3)]
+        mgr._start_workers(plan, 3)
         assert mock_scheduler.submit.call_count == 3
         for call in mock_scheduler.submit.call_args_list:
             args, kwargs = call
@@ -80,8 +82,8 @@ class TestManagerPlacement:
         ncs = [NodeConfig(name="big", cpus=16, memory_mb=65536, gpus=0)]
         cfg = make_config(node_configs=ncs)
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
-        # 8 idle tasks fit in 1 big node → plan says 1 worker
-        mgr._start_workers(8, 1)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 8)
+        mgr._start_workers(plan, 1)
         assert mock_scheduler.submit.call_count == 1
         call = mock_scheduler.submit.call_args
         _script, submit_args = call[0]
@@ -93,7 +95,8 @@ class TestManagerPlacement:
         ncs = [NodeConfig(name="gpu", cpus=4, memory_mb=8192, gpus=4)]
         cfg = make_config(node_configs=ncs)
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
-        mgr._start_workers(4, 1)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 4)
+        mgr._start_workers(plan, 1)
         call = mock_scheduler.submit.call_args
         _script, submit_args = call[0]
         assert submit_args["gpus"] == "4"
@@ -112,12 +115,12 @@ class TestManagerPlacement:
         ]
         cfg = make_config(
             node_configs=ncs,
-            task_resources={"cpus": 1, "memory_mb": 1024},
             scaling={"batch_size": 1, "max_workers": 16, "min_workers": 0},
         )
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        tasks = [TaskResources(cpus=1, memory_mb=1024)] * 9
         # 9 idle tasks: big fits 4 per node → 3 ceil(9/4) big nodes
-        plan = mgr._planner.plan(9)
+        plan = mgr._planner.plan_for_tasks(tasks)
         assert len(plan) == 1
         assert plan[0].node_config.name == "big"
         assert plan[0].count == 3
@@ -156,9 +159,10 @@ class TestSignalWorkers:
         mgr._node_assignments["1"] = "small"
         mgr._node_assignments["2"] = "small"
         mgr._node_assignments["3"] = "small"
-        # plan(0) with min_workers=0 returns [] → no nodes desired
+        # plan_for_tasks([]) with min_workers=0 returns [] → no nodes desired
         # so all 3 should be drained (excess = 3)
-        mgr._signal_workers(3, idle_count=0)
+        plan = mgr._planner.plan_for_tasks([])
+        mgr._signal_workers(3, plan=plan)
         assert mock_scheduler.signal.call_count == 3
 
     def test_signal_workers_keeps_required_nodes(self, mock_scheduler, mock_work_queue):
@@ -171,8 +175,9 @@ class TestSignalWorkers:
         mgr._node_assignments["1"] = "small"
         mgr._node_assignments["2"] = "small"
         mgr._node_assignments["3"] = "small"
-        # plan(0) with min_workers=1 returns [small x 1]
-        mgr._signal_workers(3, idle_count=0)
+        # plan_for_tasks([]) with min_workers=1 returns [small x 1]
+        plan = mgr._planner.plan_for_tasks([])
+        mgr._signal_workers(3, plan=plan)
         # 3 active - 1 desired = 2 excess
         assert mock_scheduler.signal.call_count == 2
 
@@ -189,8 +194,9 @@ class TestSignalWorkers:
         mgr._node_assignments["1"] = "small"
         mgr._node_assignments["2"] = "large"
         mgr._node_assignments["3"] = "large"
-        # plan with no idle tasks and min=0 returns []
-        mgr._signal_workers(2, idle_count=0)
+        # plan_for_tasks([]) with min=0 returns []
+        plan = mgr._planner.plan_for_tasks([])
+        mgr._signal_workers(2, plan=plan)
         # both large nodes should be drained first (higher cost, not in plan)
         called_ids = [call[0][0] for call in mock_scheduler.signal.call_args_list]
         assert "2" in called_ids
@@ -208,9 +214,9 @@ class TestSignalWorkers:
         mgr._tracked["2"] = JobInfo(job_id="2", state=JobState.RUNNING)
         mgr._node_assignments["1"] = "large"
         mgr._node_assignments["2"] = "small"
-        # plan(0) with min=0 returns []
-        # both are excess, large drained first due to higher cost
-        mgr._signal_workers(1, idle_count=0)
+        # plan_for_tasks([]) with min=0 returns []
+        plan = mgr._planner.plan_for_tasks([])
+        mgr._signal_workers(1, plan=plan)
         assert mock_scheduler.signal.call_count == 1
         called_id = mock_scheduler.signal.call_args[0][0]
         assert called_id == "1"  # large drained first

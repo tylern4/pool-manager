@@ -200,12 +200,6 @@ instead packs idle tasks into the minimum number of nodes, choosing from the
 available node types based on resource requirements.
 
 ```yaml
-scaling:
-  task_resources:
-    cpus: 1
-    memory_mb: 2000
-    gpus: 0
-
 scheduler:
   node_configs:
     - name: small
@@ -218,10 +212,10 @@ scheduler:
       gpus: 0
 ```
 
-Each idle HTCondor job is assumed to need `task_resources` (homogeneous mode).
-The planner packs as many tasks as fit per node (by CPU, memory, GPU) and
-chooses larger nodes first to minimise node count. GPU tasks automatically skip
-CPU-only nodes.
+Each idle HTCondor job's resource requirements (`RequestCpus`, `RequestMemory`,
+`RequestGpus`) are read from `condor_q` per job. The planner packs tasks
+into the minimum number of nodes and GPU tasks automatically skip CPU-only
+nodes.
 
 Per-node resource requirements (`cpus-per-task`, `mem`, `gpus`) are injected
 into each worker's submit args automatically.

@@ -11,10 +11,7 @@ scaling:
   scale_up_cooldown: 30
   scale_down_cooldown: 60
   drain_timeout: 120
-  task_resources:
-    cpus: 1
-    memory_mb: 2000
-    gpus: 0
+  # Task resources are read from condor_q (RequestCpus, RequestMemory, RequestGpus) per job.
 
 work_queue:
   backend: condor_subprocess
@@ -46,7 +43,8 @@ scheduler:
     error: "logs/pool_worker_%j.log"
 
   # Node-aware placement (optional).
-  # When task_resources.gpus > 0, add a 'gpu' node_config here.
+  # Resources per task come from condor_q; GPU tasks will automatically
+  # be assigned to GPU node_configs and CPU tasks to CPU node_configs.
   # node_configs:
   #   - name: cpu
   #     cpus: 128
