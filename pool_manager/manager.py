@@ -24,9 +24,7 @@ def _make_work_queue(cfg) -> WorkQueue:
             try:
                 import htcondor  # noqa: F401
             except ImportError:
-                log.warning(
-                    "htcondor package not available, falling back to condor_subprocess"
-                )
+                log.warning("htcondor package not available, falling back to condor_subprocess")
                 backend = CondorSubprocessBackend(schedd_name=wk.schedd_name)
             else:
                 backend = CondorPythonBackend(schedd_name=wk.schedd_name)
