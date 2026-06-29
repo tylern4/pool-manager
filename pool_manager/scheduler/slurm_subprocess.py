@@ -23,7 +23,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
     ):
         self._job_name_prefix = job_name_prefix
         self._test_mode = test_mode
-        self._user = user
+        self.user = user
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["sbatch", "--parsable"]
@@ -102,7 +102,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
         return jobs
 
     def _user(self) -> str:
-        return self._user or os.environ.get("USER", "")
+        return self.user or os.environ.get("USER", "")
 
     def signal(self, job_id: str, sig: str) -> None:
         cmd = ["scancel", "--signal", sig, job_id]

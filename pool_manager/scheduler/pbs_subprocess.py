@@ -23,7 +23,7 @@ class PBSSubprocessBackend(SchedulerBackend):
     ):
         self._job_name_prefix = job_name_prefix
         self._test_mode = test_mode
-        self._user = user
+        self.user = user
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["qsub"]
@@ -112,8 +112,9 @@ class PBSSubprocessBackend(SchedulerBackend):
     def name(self) -> str:
         return "pbs_subprocess"
 
+    @property
     def _user(self) -> str:
-        return self._user or os.environ.get("USER", "")
+        return self.user or os.environ.get("USER", "")
 
 
 def _extract_xml_value(tag: str) -> str:
