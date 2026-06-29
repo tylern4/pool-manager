@@ -130,8 +130,12 @@ class SlurmSubprocessBackend(SchedulerBackend):
 def _parse_slurm_state(raw: str) -> JobState:
     mapping = {
         "PD": JobState.PENDING,
-        "R": JobState.RUNNING,
+        "PENDING": JobState.PENDING,
         "CF": JobState.PENDING,
+        "CONFIGURING": JobState.PENDING,
+        "R": JobState.RUNNING,
+        "RUNNING": JobState.RUNNING,
         "CG": JobState.RUNNING,
+        "COMPLETING": JobState.RUNNING,
     }
-    return mapping.get(raw, JobState.UNKNOWN)
+    return mapping.get(raw.strip(), JobState.UNKNOWN)
