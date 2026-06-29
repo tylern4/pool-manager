@@ -76,7 +76,8 @@ class TestManagerPlacement:
         for call in mock_scheduler.submit.call_args_list:
             args, kwargs = call
             assert args[0] == "/fake/worker.sh"
-            assert args[1] == {"account": "myproject"}
+            assert args[1]["account"] == "myproject"
+            assert args[1]["job-name"] == "htcondor_worker_default"
 
     def test_start_workers_from_plan_adds_resource_args(self, mock_scheduler, mock_work_queue):
         ncs = [NodeConfig(name="big", cpus=16, memory_mb=65536, gpus=0)]

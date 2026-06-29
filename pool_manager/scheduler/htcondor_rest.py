@@ -9,9 +9,13 @@ log = logging.getLogger("pool_manager.scheduler.htcondor_rest")
 class CondorRestClient:
     """Simple HTTP client for the condor_rest API."""
 
-    def __init__(self, url: str, token: str = ""):
+    def __init__(
+        self, url: str, token: str = "", owner: str = "", job_name_prefix: str = "htcondor_worker_"
+    ):
         self._url = url.rstrip("/")
         self._token = token
+        self._owner = owner
+        self._job_name_prefix = job_name_prefix
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -45,12 +49,15 @@ class CondorRestClient:
         if resp.status_code not in (200, 204):
             log.warning("Failed to remove job %s via REST: HTTP %d", job_id, resp.status_code)
 
-    def list_jobs(self) -> list[dict]:
+    def list_jobs(self, constraint: str = "") -> list[dict]:
         import httpx
 
         url = f"{self._url}/condor_q"
-        log.debug("GET %s", url)
-        resp = httpx.get(url, headers=self._headers(), timeout=30)
+        params: dict[str, str] = {}
+        if constraint:
+            params["constraint"] = constraint
+        log.debug("GET %s params=%s", url, params)
+        resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
         log.log(TRACE, "list_jobs response: status=%d", resp.status_code)
         resp.raise_for_status()
         return resp.json()
@@ -68,8 +75,12 @@ _HTSTATUS_MAP = {
 
 
 class HTCondorRESTAPIBackend(SchedulerBackend):
-    def __init__(self, url: str, token: str = ""):
-        self._client = CondorRestClient(url=url, token=token)
+    def __init__(
+        self, url: str, token: str = "", owner: str = "", job_name_prefix: str = "htcondor_worker_"
+    ):
+        self._client = CondorRestClient(
+            url=url, token=token, owner=owner, job_name_prefix=job_name_prefix
+        )
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         return self._client.submit(script_path, submit_args)
@@ -78,8 +89,17 @@ class HTCondorRESTAPIBackend(SchedulerBackend):
         self._client.remove(job_id)
 
     def list_active(self) -> list[JobInfo]:
+        constraint = ""
+        if self._client._owner:
+            constraint = f'Owner == "{self._client._owner}"'
+        if self._client._job_name_prefix:
+            name_constraint = f'Name =?= "{self._client._job_name_prefix}*"'
+            if constraint:
+                constraint = f"({constraint}) && ({name_constraint})"
+            else:
+                constraint = name_constraint
         jobs: list[JobInfo] = []
-        for raw in self._client.list_jobs():
+        for raw in self._client.list_jobs(constraint=constraint):
             try:
                 cluster_id = raw.get("ClusterId")
                 job_status = raw.get("JobStatus")

@@ -29,6 +29,9 @@ class SchedulerConfig:
     sfapi_client_secret: str = ""
     sfapi_key_path: str = ""
     sfapi_user: str = ""
+    user: str = ""
+    job_name_prefix: str = "htcondor_worker_"
+    test_mode: bool = False
 
 
 @dataclass
@@ -91,6 +94,9 @@ class Config:
                 sfapi_client_secret=sch.get("sfapi_client_secret", ""),
                 sfapi_key_path=sch.get("sfapi_key_path", ""),
                 sfapi_user=sch.get("sfapi_user", ""),
+                user=sch.get("user", ""),
+                job_name_prefix=sch.get("job_name_prefix", "htcondor_worker_"),
+                test_mode=sch.get("test_mode", False),
             ),
             scaling=ScalingPolicy(
                 min_workers=sc.get("min_workers", 0),

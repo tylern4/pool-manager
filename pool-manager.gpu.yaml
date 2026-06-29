@@ -1,6 +1,7 @@
 # Pool Manager Configuration
 poll_interval: 15
 log_level: INFO
+test_mode: True
 # Logging destination: stdout (colored), file (plain), or both
 log_mode: stdout
 # log_file: pool-manager.log

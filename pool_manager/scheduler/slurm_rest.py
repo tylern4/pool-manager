@@ -1,15 +1,25 @@
 import logging
 
 from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 log = logging.getLogger("pool_manager.scheduler.slurm_rest")
 
 
 class SlurmRESTAPIBackend(SchedulerBackend):
-    def __init__(self, url: str, token: str = ""):
+    def __init__(
+        self,
+        url: str,
+        token: str = "",
+        user: str = "",
+        job_name_prefix: str = "htcondor_worker_",
+        test_mode: bool = False,
+    ):
         self._url = url.rstrip("/")
         self._token = token
+        self._user = user
+        self._job_name_prefix = job_name_prefix
+        self._test_mode = test_mode
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -18,6 +28,16 @@ class SlurmRESTAPIBackend(SchedulerBackend):
         return h
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
+        if self._test_mode:
+            job_id = _test_job_id()
+            log.info(
+                "[TEST] Would submit job %s via REST (script=%s, args=%s)",
+                job_id,
+                script_path,
+                submit_args,
+            )
+            return job_id
+
         import httpx
 
         with open(script_path) as f:
@@ -38,6 +58,10 @@ class SlurmRESTAPIBackend(SchedulerBackend):
         return job_id
 
     def cancel(self, job_id: str) -> None:
+        if self._test_mode:
+            log.info("[TEST] Would cancel job %s via REST", job_id)
+            return
+
         import httpx
 
         url = f"{self._url}/slurm/v0.0.38/job/{job_id}"
@@ -48,17 +72,27 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             log.warning("Failed to cancel job %s via REST: HTTP %d", job_id, resp.status_code)
 
     def list_active(self) -> list[JobInfo]:
+        if self._test_mode:
+            log.info("[TEST] Would list active jobs via REST")
+            return []
+
         import httpx
 
         url = f"{self._url}/slurm/v0.0.38/jobs"
-        log.debug("GET %s", url)
-        resp = httpx.get(url, headers=self._headers(), timeout=30)
+        params: dict[str, str] = {}
+        if self._user:
+            params["user"] = self._user
+        log.debug("GET %s params=%s", url, params)
+        resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
         log.log(TRACE, "list_active response: status=%d", resp.status_code)
         resp.raise_for_status()
         data = resp.json()
 
         jobs: list[JobInfo] = []
         for job in data.get("jobs", []):
+            job_name = job.get("name", "")
+            if self._job_name_prefix and not job_name.startswith(self._job_name_prefix):
+                continue
             job_id = str(job.get("job_id", ""))
             state_str = job.get("state", "").upper()
             state = _parse_slurm_rest_state(state_str)
@@ -68,6 +102,9 @@ class SlurmRESTAPIBackend(SchedulerBackend):
         return jobs
 
     def signal(self, job_id: str, sig: str) -> None:
+        if self._test_mode:
+            log.info("[TEST] Would send signal %s to job %s", sig, job_id)
+            return
         self.cancel(job_id)
 
     def name(self) -> str:

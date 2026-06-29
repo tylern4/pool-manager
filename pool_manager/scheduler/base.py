@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+
+
+def _test_job_id() -> str:
+    return f"test_{int(time.time())}_{threading.get_ident()}"
 
 
 class JobState(Enum):

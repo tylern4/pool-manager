@@ -1,4 +1,5 @@
 import logging
+import os
 import signal
 import time
 
@@ -50,25 +51,43 @@ def _make_scheduler(cfg) -> HPCScheduler:
     )
 
     sch = cfg.scheduler
+    user = sch.user or os.environ.get("USER", "")
+    job_name_prefix = sch.job_name_prefix
+
     match sch.backend:
         case "slurm_subprocess":
-            backend = SlurmSubprocessBackend()
+            backend = SlurmSubprocessBackend(
+                job_name_prefix=job_name_prefix, test_mode=sch.test_mode
+            )
         case "slurm_rest":
-            backend = SlurmRESTAPIBackend(url=sch.rest_url, token=sch.rest_token)
+            backend = SlurmRESTAPIBackend(
+                url=sch.rest_url,
+                token=sch.rest_token,
+                user=user,
+                job_name_prefix=job_name_prefix,
+                test_mode=sch.test_mode,
+            )
         case "slurm_sfapi":
             backend = SlurmSFAPIBackend(
                 machine=sch.machine,
                 client_id=sch.sfapi_client_id,
                 client_secret=sch.sfapi_client_secret,
                 key_path=sch.sfapi_key_path,
-                user=sch.sfapi_user,
+                user=sch.sfapi_user or user,
+                job_name_prefix=job_name_prefix,
+                test_mode=sch.test_mode,
             )
         case "pbs_subprocess":
-            backend = PBSSubprocessBackend()
+            backend = PBSSubprocessBackend(job_name_prefix=job_name_prefix, test_mode=sch.test_mode)
         case "local_subprocess":
-            backend = LocalSubprocessBackend()
+            backend = LocalSubprocessBackend(test_mode=sch.test_mode)
         case "htcondor_rest":
-            backend = HTCondorRESTAPIBackend(url=sch.rest_url, token=sch.rest_token)
+            backend = HTCondorRESTAPIBackend(
+                url=sch.rest_url,
+                token=sch.rest_token,
+                owner=user,
+                job_name_prefix=job_name_prefix,
+            )
         case _:
             raise ValueError(f"Unknown scheduler backend: {sch.backend}")
 
@@ -287,9 +306,12 @@ class PoolManager:
             log.error("Cannot start workers: no worker_script configured")
             return
         log.debug("Starting %d worker(s) via %s", count, script)
+        prefix = self._config.scheduler.job_name_prefix
         for i in range(count):
             try:
-                job_id = self._sched.submit(script, self._config.scheduler.submit_args)
+                args = dict(self._config.scheduler.submit_args)
+                args.setdefault("job-name", f"{prefix}default")
+                job_id = self._sched.submit(script, args)
                 self._tracked[job_id] = JobInfo(job_id=job_id, state=JobState.PENDING)
                 self._node_assignments[job_id] = "default"
                 log.info("Started worker %s (%s)", job_id, self._sched.name())
@@ -302,6 +324,7 @@ class PoolManager:
             log.error("Cannot start workers: no worker_script configured")
             return
         log.debug("Starting %d worker(s) from placement plan", count)
+        prefix = self._config.scheduler.job_name_prefix
         remaining = count
         for p in placements:
             batch = min(p.count, remaining)
@@ -309,6 +332,7 @@ class PoolManager:
                 continue
             args = dict(self._config.scheduler.submit_args)
             nc = p.node_config
+            args["job-name"] = f"{prefix}{nc.name}"
             args["cpus-per-task"] = str(nc.cpus)
             args["mem"] = f"{nc.memory_mb}M"
             if nc.gpus > 0:

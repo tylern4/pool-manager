@@ -1,9 +1,10 @@
 import logging
+import os
 import shlex
 import subprocess
 
 from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 log = logging.getLogger("pool_manager.scheduler.slurm_subprocess")
 
@@ -17,6 +18,10 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 class SlurmSubprocessBackend(SchedulerBackend):
+    def __init__(self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False):
+        self._job_name_prefix = job_name_prefix
+        self._test_mode = test_mode
+
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["sbatch", "--parsable"]
         for key, val in submit_args.items():
@@ -26,6 +31,17 @@ class SlurmSubprocessBackend(SchedulerBackend):
             else:
                 cmd.extend([f"--{key}", str(val)])
         cmd.append(script_path)
+
+        if self._test_mode:
+            job_id = _test_job_id()
+            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            log.info(
+                "[TEST] Would submit job %s (script=%s, args=%s)",
+                job_id,
+                script_path,
+                submit_args,
+            )
+            return job_id
 
         result = _run(cmd)
         if result.returncode != 0:
@@ -37,6 +53,10 @@ class SlurmSubprocessBackend(SchedulerBackend):
 
     def cancel(self, job_id: str) -> None:
         cmd = ["scancel", job_id]
+        if self._test_mode:
+            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            return
+
         result = _run(cmd)
         if result.returncode != 0:
             log.warning(
@@ -46,15 +66,23 @@ class SlurmSubprocessBackend(SchedulerBackend):
             log.debug("Cancelled Slurm job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
+        if self._test_mode:
+            log.info("[TEST] Would query sacct for active jobs")
+            return []
+
         cmd = [
-            "squeue",
+            "sacct",
             "--noheader",
-            "--format=%i,%T",
-            "--states=PD,R,CF",
+            "--parsable2",
+            "--format=JobID,JobName,State",
+            "--state=PD,R,CF,CG",
+            "--user",
+            self._user(),
+            "--starttime=now-3days",
         ]
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning("squeue failed (exit %d): %s", result.returncode, result.stderr.strip())
+            log.warning("sacct failed (exit %d): %s", result.returncode, result.stderr.strip())
             return []
 
         jobs: list[JobInfo] = []
@@ -62,18 +90,30 @@ class SlurmSubprocessBackend(SchedulerBackend):
             line = line.strip()
             if not line:
                 continue
-            parts = line.split(",", 1)
-            if len(parts) != 2:
+            parts = line.split("|", 2)
+            if len(parts) != 3:
                 continue
-            job_id, state_str = parts
+            job_id, job_name, state_str = parts
+            if "." in job_id:
+                continue
+            if self._job_name_prefix and not job_name.startswith(self._job_name_prefix):
+                continue
             state = _parse_slurm_state(state_str.strip())
             jobs.append(JobInfo(job_id=job_id, state=state))
 
         log.debug("Active Slurm jobs: %s", [j.job_id for j in jobs])
         return jobs
 
+    @staticmethod
+    def _user() -> str:
+        return os.environ.get("USER", "")
+
     def signal(self, job_id: str, sig: str) -> None:
         cmd = ["scancel", "--signal", sig, job_id]
+        if self._test_mode:
+            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            return
+
         result = _run(cmd)
         if result.returncode != 0:
             log.warning(

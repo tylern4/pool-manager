@@ -3,7 +3,7 @@ import shlex
 import subprocess
 
 from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 log = logging.getLogger("pool_manager.scheduler.pbs_subprocess")
 
@@ -17,6 +17,10 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 class PBSSubprocessBackend(SchedulerBackend):
+    def __init__(self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False):
+        self._job_name_prefix = job_name_prefix
+        self._test_mode = test_mode
+
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["qsub"]
         for key, val in submit_args.items():
@@ -26,6 +30,17 @@ class PBSSubprocessBackend(SchedulerBackend):
             else:
                 cmd.extend([f"-{key}", str(val)])
         cmd.append(script_path)
+
+        if self._test_mode:
+            job_id = _test_job_id()
+            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            log.info(
+                "[TEST] Would submit job %s (script=%s, args=%s)",
+                job_id,
+                script_path,
+                submit_args,
+            )
+            return job_id
 
         result = _run(cmd)
         if result.returncode != 0:
@@ -37,6 +52,10 @@ class PBSSubprocessBackend(SchedulerBackend):
 
     def cancel(self, job_id: str) -> None:
         cmd = ["qdel", job_id]
+        if self._test_mode:
+            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            return
+
         result = _run(cmd)
         if result.returncode != 0:
             log.warning(
@@ -46,6 +65,10 @@ class PBSSubprocessBackend(SchedulerBackend):
             log.debug("Cancelled PBS job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
+        if self._test_mode:
+            log.info("[TEST] Would query active jobs via qstat")
+            return []
+
         cmd = ["qstat", "-x", "-u", self._user()]
         result = _run(cmd)
         if result.returncode != 0:
@@ -57,6 +80,9 @@ class PBSSubprocessBackend(SchedulerBackend):
             parts = line.strip().split()
             if len(parts) < 5:
                 continue
+            job_name = _extract_xml_value(parts[1])
+            if self._job_name_prefix and not job_name.startswith(self._job_name_prefix):
+                continue
             job_id = parts[0]
             state_str = parts[4]
             state = _parse_pbs_state(state_str)
@@ -67,6 +93,10 @@ class PBSSubprocessBackend(SchedulerBackend):
 
     def signal(self, job_id: str, sig: str) -> None:
         cmd = ["qsig", "-s", sig, job_id]
+        if self._test_mode:
+            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            return
+
         result = _run(cmd)
         if result.returncode != 0:
             log.warning(
@@ -87,6 +117,15 @@ class PBSSubprocessBackend(SchedulerBackend):
         import os
 
         return os.environ.get("USER", "")
+
+
+def _extract_xml_value(tag: str) -> str:
+    """Extract the text content from an XML tag like '<name>value</name>'."""
+    if ">" not in tag or "<" not in tag:
+        return tag.strip()
+    start = tag.index(">") + 1
+    end = tag.rindex("<")
+    return tag[start:end] if start < end else tag.strip()
 
 
 def _parse_pbs_state(raw: str) -> JobState:

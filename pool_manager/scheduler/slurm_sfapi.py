@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 log = logging.getLogger("pool_manager.scheduler.slurm_sfapi")
 
@@ -15,11 +15,15 @@ class SlurmSFAPIBackend(SchedulerBackend):
         client_secret: str = "",
         key_path: str = "",
         user: str = "",
+        job_name_prefix: str = "htcondor_worker_",
+        test_mode: bool = False,
     ):
         from sfapi_client import Client
 
         self._machine = machine
         self._user = user
+        self._job_name_prefix = job_name_prefix
+        self._test_mode = test_mode
         self._client_kwargs: dict = {}
 
         if client_id and client_secret:
@@ -43,6 +47,17 @@ class SlurmSFAPIBackend(SchedulerBackend):
         return client.compute(machine)
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
+        if self._test_mode:
+            job_id = _test_job_id()
+            log.info(
+                "[TEST] Would submit job %s via SFAPI on %s (script=%s, args=%s)",
+                job_id,
+                self._machine,
+                script_path,
+                submit_args,
+            )
+            return job_id
+
         compute = self._compute()
 
         with open(script_path) as f:
@@ -71,6 +86,10 @@ class SlurmSFAPIBackend(SchedulerBackend):
         return job_id
 
     def cancel(self, job_id: str) -> None:
+        if self._test_mode:
+            log.info("[TEST] Would cancel job %s via SFAPI on %s", job_id, self._machine)
+            return
+
         from sfapi_client import Client
         from sfapi_client.compute import Machine
 
@@ -82,21 +101,28 @@ class SlurmSFAPIBackend(SchedulerBackend):
         log.debug("Cancelled job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
+        if self._test_mode:
+            log.info("[TEST] Would list active jobs via SFAPI on %s", self._machine)
+            return []
+
         from sfapi_client import Client
+        from sfapi_client._jobs import JobCommand
         from sfapi_client.compute import Machine
 
         client = Client(**self._client_kwargs)
         compute = client.compute(Machine(self._machine))
 
-        kwargs = {}
+        kwargs: dict = {}
         if self._user:
             kwargs["user"] = self._user
 
-        log.debug("Listing jobs on %s via SFAPI", self._machine)
-        jobs = compute.jobs(**kwargs)
+        log.debug("Listing jobs on %s via SFAPI (sacct)", self._machine)
+        jobs = compute.jobs(command=JobCommand.sacct, **kwargs)
 
         result: list[JobInfo] = []
         for j in jobs:
+            if self._job_name_prefix and not (j.jobname or "").startswith(self._job_name_prefix):
+                continue
             state = _sfapi_to_jobstate(j.state)
             if state in (JobState.RUNNING, JobState.PENDING):
                 result.append(JobInfo(job_id=str(j.jobid), state=state))
@@ -105,6 +131,10 @@ class SlurmSFAPIBackend(SchedulerBackend):
         return result
 
     def signal(self, job_id: str, sig: str) -> None:
+        if self._test_mode:
+            log.info("[TEST] Would send signal %s to job %s via SFAPI", sig, job_id)
+            return
+
         from sfapi_client import Client
         from sfapi_client.compute import Machine
 

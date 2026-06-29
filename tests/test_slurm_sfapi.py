@@ -123,13 +123,15 @@ class TestSlurmSFAPIBackend:
         assert jobs[1].state == JobState.PENDING
 
     def test_list_active_passes_user(self, mock_client):
+        from sfapi_client._jobs import JobCommand
+
         mock_cls, mock_instance, mock_compute = mock_client
         mock_compute.jobs.return_value = []
 
         backend = SlurmSFAPIBackend(machine="perlmutter", user="elvis")
         backend.list_active()
 
-        mock_compute.jobs.assert_called_once_with(user="elvis")
+        mock_compute.jobs.assert_called_once_with(command=JobCommand.sacct, user="elvis")
 
     def test_signal(self, mock_client):
         mock_cls, mock_instance, mock_compute = mock_client
