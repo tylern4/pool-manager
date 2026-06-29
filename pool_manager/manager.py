@@ -127,6 +127,7 @@ class PoolManager:
     def _handle_signal(self, signum, frame):
         self._daemon_shutdown = True
         self._running = False
+        raise KeyboardInterrupt()
 
     def run(self):
         log.info(
@@ -148,18 +149,20 @@ class PoolManager:
 
         self._recover_state()
 
-        while self._running:
-            try:
-                self._tick()
-            except Exception:
-                log.exception("Unhandled error in main loop")
+        try:
+            while self._running:
+                try:
+                    self._tick()
+                except Exception:
+                    log.exception("Unhandled error in main loop")
 
-            if not self._running:
-                break
+                if not self._running:
+                    break
 
-            time.sleep(self._config.poll_interval)
+                time.sleep(self._config.poll_interval)
+        except KeyboardInterrupt:
+            log.info("Shutting down")
 
-        log.info("Shutting down")
         if self._daemon_shutdown and self._policy.drain_on_stop:
             self._drain_all()
         log.info("Pool manager stopped")
