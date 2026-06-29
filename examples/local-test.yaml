@@ -1,0 +1,39 @@
+# Example: local subprocess (no HPC cluster, for testing)
+
+poll_interval: 10
+log_level: DEBUG
+
+scaling:
+  min_workers: 0
+  max_workers: 4
+  batch_size: 1
+  scale_up_cooldown: 10
+  scale_down_cooldown: 15
+  drain_timeout: 30
+  task_resources:
+    cpus: 1
+    memory_mb: 1024
+    gpus: 0
+
+work_queue:
+  backend: condor_subprocess
+  schedd_name: ""
+  constraint: 'JobStatus == 1'
+
+scheduler:
+  backend: local_subprocess
+  worker_script: /tmp/worker.sh
+
+  submit_args:
+    foo: bar
+
+  # Test node-aware placement with one or more configs.
+  # node_configs:
+  #   - name: small
+  #     cpus: 2
+  #     memory_mb: 2048
+  #     gpus: 0
+  #   - name: large
+  #     cpus: 4
+  #     memory_mb: 4096
+  #     gpus: 0

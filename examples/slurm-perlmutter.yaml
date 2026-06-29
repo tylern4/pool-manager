@@ -1,0 +1,58 @@
+# Example: NERSC Perlmutter (Slurm + SFAPI or sbatch)
+# Docs: https://docs.nersc.gov/systems/perlmutter/running-jobs/#example-scripts
+
+poll_interval: 15
+log_level: INFO
+
+scaling:
+  min_workers: 0
+  max_workers: 50
+  batch_size: 1
+  scale_up_cooldown: 30
+  scale_down_cooldown: 60
+  drain_timeout: 120
+  task_resources:
+    cpus: 1
+    memory_mb: 2000
+    gpus: 0
+
+work_queue:
+  backend: condor_subprocess
+  schedd_name: ""
+  constraint: 'JobStatus == 1'
+
+scheduler:
+  # Use slurm_subprocess for sbatch, or slurm_sfapi for the NERSC API
+  backend: slurm_subprocess
+  worker_script: /global/homes/m/myuser/htcondor_worker.sh
+
+  # SFAPI (if using slurm_sfapi backend):
+  # machine: perlmutter
+  # sfapi_client_id: "your-client-id"
+  # sfapi_client_secret: '{"keys":[...]}'
+  # sfapi_key_path: /path/to/key.pem
+  # sfapi_user: ""
+
+  submit_args:
+    qos: regular
+    constraint: cpu
+    nodes: 1
+    ntasks: 1
+    cpus-per-task: 128
+    time: "04:00:00"
+    account: mXXXX
+    job-name: pool-worker
+    output: "logs/pool_worker_%j.log"
+    error: "logs/pool_worker_%j.log"
+
+  # Node-aware placement (optional).
+  # When task_resources.gpus > 0, add a 'gpu' node_config here.
+  # node_configs:
+  #   - name: cpu
+  #     cpus: 128
+  #     memory_mb: 256000
+  #     gpus: 0
+  #   - name: gpu
+  #     cpus: 64
+  #     memory_mb: 256000
+  #     gpus: 4

@@ -1,0 +1,46 @@
+# Example: ALCF (Crux / Polaris) — PBS/Torque
+# Docs: https://docs.alcf.anl.gov/crux/queueing-and-running-jobs/running-jobs/
+
+poll_interval: 15
+log_level: INFO
+
+scaling:
+  min_workers: 0
+  max_workers: 20
+  batch_size: 1
+  scale_up_cooldown: 30
+  scale_down_cooldown: 60
+  drain_timeout: 120
+  task_resources:
+    cpus: 1
+    memory_mb: 2000
+    gpus: 0
+
+work_queue:
+  backend: condor_subprocess
+  schedd_name: ""
+  constraint: 'JobStatus == 1'
+
+scheduler:
+  backend: pbs_subprocess
+  worker_script: /home/myuser/htcondor_worker.sh
+
+  # PBS flags: each key/value is passed as -key value to qsub.
+  # Use -l for resources (select, walltime, etc.).
+  submit_args:
+    A: myproject
+    q: debug
+    l: "select=1:ncpus=64:system=crux"
+    N: pool-worker
+    o: "logs/pool_worker.log"
+    e: "logs/pool_worker.log"
+    # walltime via a second -l (last value wins for duplicate keys)
+    l: "walltime=01:00:00"
+
+  # Node-aware placement (optional).
+  # When defined, the planner packs tasks into the specified node types.
+  # node_configs:
+  #   - name: crux
+  #     cpus: 64
+  #     memory_mb: 256000
+  #     gpus: 0
