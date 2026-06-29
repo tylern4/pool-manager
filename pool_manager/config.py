@@ -67,6 +67,7 @@ class Config:
                 cpus=int(n.get("cpus", 1)),
                 memory_mb=int(n.get("memory_mb", n.get("memory_gb", 1.024) * 1000)),
                 gpus=int(n.get("gpus", 0)),
+                submit_args=n.get("submit_args"),
             )
             for n in node_configs_raw
         ]

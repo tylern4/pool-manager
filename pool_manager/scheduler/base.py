@@ -38,6 +38,7 @@ class NodeConfig:
     cpus: int = 1
     memory_mb: int = 1024
     gpus: int = 0
+    submit_args: dict[str, str] | None = None
 
 
 class SchedulerBackend(ABC):

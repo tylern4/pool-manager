@@ -109,6 +109,52 @@ class TestManagerPlacement:
         mgr._tick()
         assert mock_scheduler.submit.called
 
+    def test_start_workers_from_plan_with_node_submit_args(self, mock_scheduler, mock_work_queue):
+        ncs = [
+            NodeConfig(
+                name="big",
+                cpus=16,
+                memory_mb=65536,
+                gpus=0,
+                submit_args={"partition": "highmem"},
+            ),
+        ]
+        cfg = make_config(node_configs=ncs)
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 4)
+        mgr._start_workers(plan, 1)
+        call = mock_scheduler.submit.call_args
+        _script, submit_args = call[0]
+        assert submit_args["partition"] == "highmem"
+        assert submit_args["account"] == "myproject"
+        assert submit_args["cpus-per-task"] == "16"
+
+    def test_start_workers_from_plan_node_submit_args_per_type(
+        self, mock_scheduler, mock_work_queue
+    ):
+        ncs = [
+            NodeConfig(
+                name="gpu",
+                cpus=4,
+                memory_mb=8192,
+                gpus=4,
+                submit_args={"partition": "gpu", "qos": "high"},
+            ),
+            NodeConfig(name="cpu", cpus=16, memory_mb=65536, gpus=0),
+        ]
+        cfg = make_config(node_configs=ncs)
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        mgr._planner._task_resources = TaskResources(cpus=1, memory_mb=1024, gpus=1)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024, gpus=1)] * 4)
+        mgr._start_workers(plan, 2)
+        assert mock_scheduler.submit.call_count == 1
+        call = mock_scheduler.submit.call_args
+        _script, submit_args = call[0]
+        assert submit_args["partition"] == "gpu"
+        assert submit_args["qos"] == "high"
+        assert submit_args["account"] == "myproject"
+        assert submit_args["gpus"] == "4"
+
     def test_scale_up_distributes_across_node_types(self, mock_scheduler, mock_work_queue):
         ncs = [
             NodeConfig(name="big", cpus=4, memory_mb=4096),

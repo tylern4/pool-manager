@@ -36,15 +36,20 @@ scheduler:
   # Node configurations for placement-aware scheduling.
   # When defined, the pool manager chooses the minimum number of nodes
   # to fit all idle tasks based on their resource requirements.
+  # Per-node submit_args override the scheduler-level submit_args
+  # and support the same key-value format.
   node_configs:
     - name: small
       cpus: 4
       memory_mb: 8000
       gpus: 0
+      submit_args:
+        partition: debug
     - name: large
       cpus: 16
       memory_mb: 64000
       gpus: 0
+      # no submit_args → inherits scheduler defaults
   # These are passed as --key=value to sbatch (or -key value to qsub)
   submit_args:
     partition: defq

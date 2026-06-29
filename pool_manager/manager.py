@@ -368,6 +368,8 @@ class PoolManager:
                 continue
             args = dict(self._config.scheduler.submit_args)
             nc = p.node_config
+            if nc.submit_args:
+                args.update(nc.submit_args)
             args["job-name"] = f"{prefix}{nc.name}"
             args["cpus-per-task"] = str(nc.cpus)
             args["mem"] = f"{nc.memory_mb}M"
