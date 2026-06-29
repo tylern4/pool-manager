@@ -8,7 +8,7 @@ log = logging.getLogger("pool_manager.work_queue.condor")
 
 
 class CondorWorkQueue(WorkQueue):
-    def __init__(self, backend: CondorBackend, constraint: str = "JobStatus == 1"):
+    def __init__(self, backend: CondorBackend, constraint: str = ""):
         self._backend = backend
         self._constraint = constraint
 

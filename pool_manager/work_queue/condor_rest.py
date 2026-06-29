@@ -12,10 +12,10 @@ class CondorRESTAPIBackend(CondorBackend):
         self._url = url.rstrip("/")
         self._token = token
 
-    def count_idle(self, constraint: str = "JobStatus == 1") -> int:
+    def count_idle(self, constraint: str = "") -> int:
         return len(self.list_idle(constraint=constraint))
 
-    def list_idle(self, constraint: str = "JobStatus == 1") -> list[TaskResources]:
+    def list_idle(self, constraint: str = "") -> list[TaskResources]:
         import httpx
 
         headers = {}

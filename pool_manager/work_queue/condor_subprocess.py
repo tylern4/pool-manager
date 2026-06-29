@@ -39,11 +39,11 @@ class CondorSubprocessBackend(CondorBackend):
             log.warning("Failed to parse condor_q JSON output: %s", e)
             return []
 
-    def count_idle(self, constraint: str = "JobStatus == 1") -> int:
+    def count_idle(self, constraint: str = "") -> int:
         jobs = self._query_json(constraint)
         return len(jobs)
 
-    def list_idle(self, constraint: str = "JobStatus == 1") -> list[TaskResources]:
+    def list_idle(self, constraint: str = "") -> list[TaskResources]:
         jobs = self._query_json(constraint)
         tasks = []
         for job in jobs:

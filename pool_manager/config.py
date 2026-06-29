@@ -12,7 +12,7 @@ from pool_manager.scaling import ScalingPolicy
 class WorkQueueConfig:
     backend: str = "condor_python"
     schedd_name: str = ""
-    constraint: str = "JobStatus == 1"
+    constraint: str = ""
     rest_url: str = ""
 
 
@@ -80,7 +80,7 @@ class Config:
             work_queue=WorkQueueConfig(
                 backend=wk.get("backend", "condor_python"),
                 schedd_name=wk.get("schedd_name", ""),
-                constraint=wk.get("constraint", "JobStatus == 1"),
+                constraint=wk.get("constraint", ""),
                 rest_url=wk.get("rest_url", ""),
             ),
             scheduler=SchedulerConfig(

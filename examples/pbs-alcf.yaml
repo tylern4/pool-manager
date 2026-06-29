@@ -16,7 +16,7 @@ scaling:
 work_queue:
   backend: condor_subprocess
   schedd_name: ""
-  constraint: 'JobStatus == 1'
+  constraint: "" # classad expression (default: all jobs; e.g. "JobStatus == 1" for idle only)
 
 scheduler:
   backend: pbs_subprocess

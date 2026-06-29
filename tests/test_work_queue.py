@@ -12,7 +12,7 @@ class _FakeCondorBackend(CondorBackend):
         self.called_with_constraint = constraint
         return self._count
 
-    def list_idle(self, constraint: str = "JobStatus == 1") -> list[TaskResources]:
+    def list_idle(self, constraint: str = "") -> list[TaskResources]:
         self.called_with_constraint = constraint
         return [TaskResources() for _ in range(self._count)]
 
@@ -46,4 +46,4 @@ class TestCondorWorkQueue:
         backend = _FakeCondorBackend()
         wq = CondorWorkQueue(backend=backend)
         assert wq.count_idle() == 5
-        assert backend.called_with_constraint == "JobStatus == 1"
+        assert backend.called_with_constraint == ""

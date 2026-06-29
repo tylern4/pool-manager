@@ -83,7 +83,7 @@ scaling:
 work_queue:
   backend: condor_python      # condor_python | condor_subprocess | condor_rest
   schedd_name: ""              # optional schedd name (default pool)
-  constraint: "JobStatus == 1" # classad expression to match idle jobs
+  constraint: "" # classad expression (default: all jobs; e.g. "JobStatus == 1" for idle only)
   rest_url: ""                 # required for condor_rest
 ```
 
