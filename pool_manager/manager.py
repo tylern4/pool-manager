@@ -267,7 +267,23 @@ class PoolManager:
 
     def _start_workers(self, plan: list[Placement], count: int):
         if self._has_node_configs:
-            self._start_workers_from_plan(plan, count)
+            existing_per_type: dict[str, int] = {}
+            for jid, ji in self._tracked.items():
+                if ji.state in (JobState.PENDING, JobState.RUNNING, JobState.DRAINING):
+                    nt = self._node_assignments.get(jid, "unknown")
+                    existing_per_type[nt] = existing_per_type.get(nt, 0) + 1
+
+            adjusted_plan = []
+            total_needed = 0
+            for p in plan:
+                existing = existing_per_type.get(p.node_config.name, 0)
+                needed = max(0, p.count - existing)
+                if needed > 0:
+                    adjusted_plan.append(Placement(node_config=p.node_config, count=needed))
+                    total_needed += needed
+
+            if total_needed > 0:
+                self._start_workers_from_plan(adjusted_plan, min(count, total_needed))
         else:
             self._start_workers_simple(count)
 
