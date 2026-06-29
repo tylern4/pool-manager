@@ -161,7 +161,7 @@ class TestPlan:
         # batch_size is ignored when node configs exist; 1 huge node fits all
         assert placements[0].count == 1
 
-    def test_skips_node_type_that_cannot_fit_task(self):
+    def test_skips_gpu_node_when_no_gpu_tasks(self):
         nc = [
             NodeConfig(name="gpu", cpus=4, memory_mb=8192, gpus=1),
             NodeConfig(name="cpu", cpus=4, memory_mb=8192, gpus=0),
@@ -172,7 +172,7 @@ class TestPlan:
         )
         placements = p.plan(4)
         assert len(placements) == 1
-        assert placements[0].node_config.name == "gpu"  # larger by capacity metric
+        assert placements[0].node_config.name == "cpu"  # GPU node skipped for non-GPU tasks
 
     def test_gpu_task_requires_gpu_node(self):
         nc = [

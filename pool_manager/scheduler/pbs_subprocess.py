@@ -69,7 +69,7 @@ class PBSSubprocessBackend(SchedulerBackend):
             log.debug("Cancelled PBS job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
-        cmd = ["qstat", "-x", "-u", self._user()]
+        cmd = ["qstat", "-x", "-u", self._user]
         result = _run(cmd)
         if result.returncode != 0:
             log.warning("qstat failed (exit %d): %s", result.returncode, result.stderr.strip())

@@ -65,8 +65,12 @@ class PlacementPlanner:
         if idle_count <= 0:
             return self._min_plan()
 
+        configs = [
+            nc for nc in self._node_configs if (nc.gpus > 0) == (self._task_resources.gpus > 0)
+        ] or self._node_configs
+
         sorted_configs = sorted(
-            self._node_configs,
+            configs,
             key=lambda n: n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1),
             reverse=True,
         )
@@ -206,6 +210,8 @@ class PlacementPlanner:
                 continue
 
             for nc in sorted_configs:
+                if task.gpus == 0 and nc.gpus > 0:
+                    continue
                 if self._tasks_fit_on_node(nc, [task]):
                     nodes.append((nc, [task]))
                     placed = True
@@ -251,6 +257,7 @@ class PlacementPlanner:
     def _min_plan(self) -> list[Placement]:
         if not self._node_configs or self._min_workers <= 0:
             return []
-        nc = self._node_configs[0]
+        configs = [nc for nc in self._node_configs if nc.gpus == 0] or self._node_configs
+        nc = configs[0]
         count = min(self._min_workers, self._max_workers)
         return [Placement(node_config=nc, count=count)]

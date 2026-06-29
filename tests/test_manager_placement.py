@@ -96,7 +96,7 @@ class TestManagerPlacement:
         ncs = [NodeConfig(name="gpu", cpus=4, memory_mb=8192, gpus=4)]
         cfg = make_config(node_configs=ncs)
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
-        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 4)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024, gpus=1)] * 4)
         mgr._start_workers(plan, 1)
         call = mock_scheduler.submit.call_args
         _script, submit_args = call[0]

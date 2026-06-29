@@ -75,7 +75,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
             "--parsable2",
             "--format=JobID,JobName,State",
             "--user",
-            self._user(),
+            self._user,
         ]
         result = _run(cmd)
         if result.returncode != 0:
@@ -101,6 +101,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
         log.debug("Active Slurm jobs: %s", [j.job_id for j in jobs])
         return jobs
 
+    @property
     def _user(self) -> str:
         return self.user or os.environ.get("USER", "")
 
