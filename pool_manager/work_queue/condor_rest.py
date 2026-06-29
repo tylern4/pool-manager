@@ -22,10 +22,11 @@ class CondorRESTAPIBackend(CondorBackend):
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
 
-        params = {
-            "constraint": constraint,
+        params: dict[str, str] = {
             "projection": "ClusterId,RequestCpus,RequestMemory,RequestGpus",
         }
+        if constraint:
+            params["constraint"] = constraint
         url = f"{self._url}/v1/jobs"
 
         log.debug("GET %s with params: %s", url, params)

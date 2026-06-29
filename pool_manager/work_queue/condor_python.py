@@ -23,7 +23,10 @@ class CondorPythonBackend(CondorBackend):
             self._schedd_name or "(default)",
             constraint,
         )
-        result = schedd.query(constraint=constraint, projection=projection)
+        kw = {"projection": projection}
+        if constraint:
+            kw["constraint"] = constraint
+        result = schedd.query(**kw)
         tasks = [
             TaskResources(
                 cpus=float(job.get("RequestCpus", 1) or 1),

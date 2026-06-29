@@ -18,7 +18,8 @@ class CondorSubprocessBackend(CondorBackend):
         cmd = ["condor_q", "-json"]
         if self._schedd_name:
             cmd.extend(["-pool", self._schedd_name])
-        cmd.extend(["-constraint", constraint])
+        if constraint:
+            cmd.extend(["-constraint", constraint])
 
         log.debug("Running condor_q command: %s", shlex.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
