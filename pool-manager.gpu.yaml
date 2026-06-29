@@ -1,10 +1,9 @@
 # Pool Manager Configuration
-poll_interval: 15
-log_level: INFO
-test_mode: True
+poll_interval: 60
+log_level: DEBUG
 # Logging destination: stdout (colored), file (plain), or both
-log_mode: stdout
-# log_file: pool-manager.log
+log_mode: both
+log_file: pool-manager.log
 
 # Scaling policy
 scaling:
@@ -14,25 +13,20 @@ scaling:
   scale_up_cooldown: 30
   scale_down_cooldown: 60
   drain_timeout: 120
+  drain_on_stop: False
 
 # Work queue (HTCondor) configuration
 work_queue:
-  backend: condor_python # condor_python | condor_subprocess | condor_rest
+  backend: condor_subprocess # condor_python | condor_subprocess | condor_rest
   schedd_name: "" # leave empty for default schedd
-  constraint: "" # classad expression (default: all jobs; e.g. "JobStatus == 1" for idle only)
-  rest_url: "" # required for condor_rest backend
 
 # HPC scheduler configuration
 scheduler:
   backend: slurm_subprocess # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess | local_subprocess | htcondor_rest
-  worker_script: /path/to/htcondor_worker.sh
-  rest_url: ""
-  rest_token: ""
-  machine: "" # required for slurm_sfapi (e.g., "perlmutter")
-  sfapi_client_id: "" # for slurm_sfapi auth
-  sfapi_client_secret: "" # for slurm_sfapi auth (JWK JSON string)
-  sfapi_key_path: "" # alternate auth: path to key file
-  sfapi_user: "" # username to filter jobs (default: all)
+  worker_script: htcondor_worker.sh
+  job_name_prefix: jaws_perlmutter_prod_htcondor_worker_
+  user: jaws
+  test_mode: True
   # Node configurations for placement-aware scheduling.
   # When defined, the pool manager chooses the minimum number of nodes
   # to fit all idle tasks based on their resource requirements.
@@ -47,8 +41,6 @@ scheduler:
       gpus: 0
   # These are passed as --key=value to sbatch (or -key value to qsub)
   submit_args:
-    partition: defq
-    account: myproject
-    time: "08:00:00"
+    account: m342
+    time: "2-00:00:00"
     nodes: 1
-    ntasks: 1
