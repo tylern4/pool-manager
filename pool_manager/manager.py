@@ -125,9 +125,8 @@ class PoolManager:
         signal.signal(signal.SIGTERM, self._handle_signal)
 
     def _handle_signal(self, signum, frame):
-        sig_name = signal.Signals(signum).name
-        log.info("Received %s, initiating shutdown", sig_name)
         self._daemon_shutdown = True
+        self._running = False
 
     def run(self):
         log.info(
@@ -155,14 +154,14 @@ class PoolManager:
             except Exception:
                 log.exception("Unhandled error in main loop")
 
-            if self._daemon_shutdown:
-                if self._policy.drain_on_stop:
-                    self._drain_all()
-                self._running = False
+            if not self._running:
                 break
 
             time.sleep(self._config.poll_interval)
 
+        log.info("Shutting down")
+        if self._daemon_shutdown and self._policy.drain_on_stop:
+            self._drain_all()
         log.info("Pool manager stopped")
 
     def _tick(self):
