@@ -13,6 +13,7 @@ scaling:
   scale_up_cooldown: 30
   scale_down_cooldown: 60
   drain_timeout: 120
+  # drain_on_stop: true  # drain all workers when the daemon stops (default: false)
 
 # Work queue (HTCondor) configuration
 work_queue:

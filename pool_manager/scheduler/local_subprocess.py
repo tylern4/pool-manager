@@ -74,10 +74,6 @@ class LocalSubprocessBackend(SchedulerBackend):
             mp.proc.wait()
 
     def list_active(self) -> list[JobInfo]:
-        if self._test_mode:
-            log.info("[TEST] Would list active local workers")
-            return []
-
         jobs: list[JobInfo] = []
         dead_ids: list[str] = []
         for job_id, mp in self._procs.items():

@@ -5,7 +5,7 @@ import time
 
 from pool_manager.config import Config
 from pool_manager.placement import Placement, PlacementPlanner, TaskResources
-from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState
+from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState, parse_config_name
 from pool_manager.work_queue.base import WorkQueue
 
 log = logging.getLogger("pool_manager.manager")
@@ -57,7 +57,7 @@ def _make_scheduler(cfg) -> HPCScheduler:
     match sch.backend:
         case "slurm_subprocess":
             backend = SlurmSubprocessBackend(
-                job_name_prefix=job_name_prefix, test_mode=sch.test_mode
+                job_name_prefix=job_name_prefix, test_mode=sch.test_mode, user=user
             )
         case "slurm_rest":
             backend = SlurmRESTAPIBackend(
@@ -78,7 +78,9 @@ def _make_scheduler(cfg) -> HPCScheduler:
                 test_mode=sch.test_mode,
             )
         case "pbs_subprocess":
-            backend = PBSSubprocessBackend(job_name_prefix=job_name_prefix, test_mode=sch.test_mode)
+            backend = PBSSubprocessBackend(
+                job_name_prefix=job_name_prefix, test_mode=sch.test_mode, user=user
+            )
         case "local_subprocess":
             backend = LocalSubprocessBackend(test_mode=sch.test_mode)
         case "htcondor_rest":
@@ -145,6 +147,8 @@ class PoolManager:
                 len(self._config.scheduler.node_configs),
             )
 
+        self._recover_state()
+
         while self._running:
             try:
                 self._tick()
@@ -152,7 +156,8 @@ class PoolManager:
                 log.exception("Unhandled error in main loop")
 
             if self._daemon_shutdown:
-                self._drain_all()
+                if self._policy.drain_on_stop:
+                    self._drain_all()
                 self._running = False
                 break
 
@@ -176,15 +181,28 @@ class PoolManager:
         self._reconcile()
         self._scale(tasks, plan, target)
 
+    def _recover_state(self):
+        active = self._sched.list_active()
+        prefix = self._config.scheduler.job_name_prefix
+        for aj in active:
+            self._tracked[aj.job_id] = aj
+            config_name = parse_config_name(aj.job_name, prefix)
+            self._node_assignments.setdefault(aj.job_id, config_name)
+        if active:
+            log.info("Recovered %d active worker(s) from scheduler", len(active))
+
     def _reconcile(self):
         active = self._sched.list_active()
         active_ids = {j.job_id for j in active}
+        prefix = self._config.scheduler.job_name_prefix
 
         for aj in active:
             existing = self._tracked.get(aj.job_id)
             if existing is None:
                 log.debug("Tracking new job %s (state=%s)", aj.job_id, aj.state.value)
                 self._tracked[aj.job_id] = aj
+                config_name = parse_config_name(aj.job_name, prefix)
+                self._node_assignments.setdefault(aj.job_id, config_name)
             elif existing.state != aj.state:
                 log.debug(
                     "Job %s state change: %s -> %s", aj.job_id, existing.state.value, aj.state.value

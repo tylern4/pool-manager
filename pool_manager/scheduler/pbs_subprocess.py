@@ -1,4 +1,5 @@
 import logging
+import os
 import shlex
 import subprocess
 
@@ -17,9 +18,12 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 class PBSSubprocessBackend(SchedulerBackend):
-    def __init__(self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False):
+    def __init__(
+        self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False, user: str = ""
+    ):
         self._job_name_prefix = job_name_prefix
         self._test_mode = test_mode
+        self._user = user
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["qsub"]
@@ -65,10 +69,6 @@ class PBSSubprocessBackend(SchedulerBackend):
             log.debug("Cancelled PBS job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
-        if self._test_mode:
-            log.info("[TEST] Would query active jobs via qstat")
-            return []
-
         cmd = ["qstat", "-x", "-u", self._user()]
         result = _run(cmd)
         if result.returncode != 0:
@@ -86,7 +86,7 @@ class PBSSubprocessBackend(SchedulerBackend):
             job_id = parts[0]
             state_str = parts[4]
             state = _parse_pbs_state(state_str)
-            jobs.append(JobInfo(job_id=job_id, state=state))
+            jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
 
         log.debug("Active PBS jobs: %s", [j.job_id for j in jobs])
         return jobs
@@ -112,11 +112,8 @@ class PBSSubprocessBackend(SchedulerBackend):
     def name(self) -> str:
         return "pbs_subprocess"
 
-    @staticmethod
-    def _user() -> str:
-        import os
-
-        return os.environ.get("USER", "")
+    def _user(self) -> str:
+        return self._user or os.environ.get("USER", "")
 
 
 def _extract_xml_value(tag: str) -> str:

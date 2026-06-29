@@ -23,6 +23,13 @@ class JobState(Enum):
 class JobInfo:
     job_id: str
     state: JobState
+    job_name: str = ""
+
+
+def parse_config_name(job_name: str, prefix: str = "htcondor_worker_") -> str:
+    if job_name.startswith(prefix):
+        return job_name[len(prefix) :]
+    return "default"
 
 
 @dataclass

@@ -101,10 +101,6 @@ class SlurmSFAPIBackend(SchedulerBackend):
         log.debug("Cancelled job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
-        if self._test_mode:
-            log.info("[TEST] Would list active jobs via SFAPI on %s", self._machine)
-            return []
-
         from sfapi_client import Client
         from sfapi_client._jobs import JobCommand
         from sfapi_client.compute import Machine
@@ -125,7 +121,7 @@ class SlurmSFAPIBackend(SchedulerBackend):
                 continue
             state = _sfapi_to_jobstate(j.state)
             if state in (JobState.RUNNING, JobState.PENDING):
-                result.append(JobInfo(job_id=str(j.jobid), state=state))
+                result.append(JobInfo(job_id=str(j.jobid), state=state, job_name=j.jobname or ""))
 
         log.debug("Active jobs on %s: %s", self._machine, [j.job_id for j in result])
         return result

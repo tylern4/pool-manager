@@ -103,11 +103,12 @@ class HTCondorRESTAPIBackend(SchedulerBackend):
             try:
                 cluster_id = raw.get("ClusterId")
                 job_status = raw.get("JobStatus")
+                job_name = raw.get("Name", "")
                 if cluster_id is None:
                     continue
                 state = _parse_htcondor_job_status(job_status)
                 if state in (JobState.PENDING, JobState.RUNNING):
-                    jobs.append(JobInfo(job_id=str(cluster_id), state=state))
+                    jobs.append(JobInfo(job_id=str(cluster_id), state=state, job_name=job_name))
             except Exception:
                 log.exception("Failed to parse job from REST response: %s", raw)
         return jobs

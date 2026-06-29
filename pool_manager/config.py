@@ -105,5 +105,6 @@ class Config:
                 scale_up_cooldown=sc.get("scale_up_cooldown", 30.0),
                 scale_down_cooldown=sc.get("scale_down_cooldown", 60.0),
                 drain_timeout=sc.get("drain_timeout", 120.0),
+                drain_on_stop=sc.get("drain_on_stop", False),
             ),
         )

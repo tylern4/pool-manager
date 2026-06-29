@@ -72,10 +72,6 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             log.warning("Failed to cancel job %s via REST: HTTP %d", job_id, resp.status_code)
 
     def list_active(self) -> list[JobInfo]:
-        if self._test_mode:
-            log.info("[TEST] Would list active jobs via REST")
-            return []
-
         import httpx
 
         url = f"{self._url}/slurm/v0.0.38/jobs"
@@ -96,7 +92,7 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             job_id = str(job.get("job_id", ""))
             state_str = job.get("state", "").upper()
             state = _parse_slurm_rest_state(state_str)
-            jobs.append(JobInfo(job_id=job_id, state=state))
+            jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
 
         log.debug("Active Slurm jobs from REST: %s", [j.job_id for j in jobs])
         return jobs

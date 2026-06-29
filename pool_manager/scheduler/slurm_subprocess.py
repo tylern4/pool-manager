@@ -18,9 +18,12 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 class SlurmSubprocessBackend(SchedulerBackend):
-    def __init__(self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False):
+    def __init__(
+        self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False, user: str = ""
+    ):
         self._job_name_prefix = job_name_prefix
         self._test_mode = test_mode
+        self._user = user
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["sbatch", "--parsable"]
@@ -66,19 +69,13 @@ class SlurmSubprocessBackend(SchedulerBackend):
             log.debug("Cancelled Slurm job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
-        if self._test_mode:
-            log.info("[TEST] Would query sacct for active jobs")
-            return []
-
         cmd = [
             "sacct",
             "--noheader",
             "--parsable2",
             "--format=JobID,JobName,State",
-            "--state=PD,R,CF,CG",
             "--user",
             self._user(),
-            "--starttime=now-3days",
         ]
         result = _run(cmd)
         if result.returncode != 0:
@@ -99,14 +96,13 @@ class SlurmSubprocessBackend(SchedulerBackend):
             if self._job_name_prefix and not job_name.startswith(self._job_name_prefix):
                 continue
             state = _parse_slurm_state(state_str.strip())
-            jobs.append(JobInfo(job_id=job_id, state=state))
+            jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
 
         log.debug("Active Slurm jobs: %s", [j.job_id for j in jobs])
         return jobs
 
-    @staticmethod
-    def _user() -> str:
-        return os.environ.get("USER", "")
+    def _user(self) -> str:
+        return self._user or os.environ.get("USER", "")
 
     def signal(self, job_id: str, sig: str) -> None:
         cmd = ["scancel", "--signal", sig, job_id]

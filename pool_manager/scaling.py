@@ -13,6 +13,7 @@ class ScalingPolicy:
     scale_up_cooldown: float = 30.0
     scale_down_cooldown: float = 60.0
     drain_timeout: float = 120.0
+    drain_on_stop: bool = False
     task_resources: TaskResources = field(default_factory=TaskResources)
 
     def target_size(self, idle_count: int) -> int:
