@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from pool_manager.config import Config
 from pool_manager.log import setup_logging
@@ -55,18 +56,22 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command in ("run", None):
+    if args.command is None:
+        args.command = "run"
+
+    if args.command == "run":
         _run_daemon(args)
     elif args.command == "test-strategy":
         _run_test_strategy(args)
 
 
 def _run_daemon(args):
-    config = Config.from_file(args.config)
+    config_path = getattr(args, "config", "pool-manager.yaml")
+    config = Config.from_file(Path(config_path))
 
-    level = args.log_level or config.log_level
-    logger = setup_logging(level)
-    logger.info("Loading config from %s", args.config)
+    level = getattr(args, "log_level", None) or config.log_level
+    logger = setup_logging(level, log_mode=config.log_mode, log_file=config.log_file)
+    logger.info("Loading config from %s", config_path)
     logger.debug(
         "Config: poll_interval=%s min=%d max=%d batch=%d backend=%s scheduler=%s",
         config.poll_interval,
@@ -92,10 +97,11 @@ def _run_daemon(args):
 
 
 def _run_test_strategy(args):
-    level = args.log_level or "WARNING"
+    level = getattr(args, "log_level", None) or "WARNING"
     setup_logging(level)
 
-    config = Config.from_file(args.config)
+    config_path = getattr(args, "config", "pool-manager.yaml")
+    config = Config.from_file(Path(config_path))
     ncs = config.scheduler.node_configs
     policy = config.scaling
 

@@ -1,5 +1,5 @@
-import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -35,16 +35,19 @@ class SchedulerConfig:
 class Config:
     poll_interval: float = 15.0
     log_level: str = "INFO"
+    log_mode: str = "stdout"
+    log_file: str = ""
     work_queue: WorkQueueConfig = field(default_factory=WorkQueueConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     scaling: ScalingPolicy = field(default_factory=ScalingPolicy)
 
     @classmethod
-    def from_file(cls, path: str) -> "Config":
-        if not os.path.exists(path):
+    def from_file(cls, path: Path | str) -> "Config":
+        path = Path(path)
+        if not path.exists():
             return cls()
 
-        with open(path) as f:
+        with path.open("r") as f:
             raw = yaml.safe_load(f)
 
         if not raw:
@@ -59,7 +62,7 @@ class Config:
             NodeConfig(
                 name=n.get("name", ""),
                 cpus=int(n.get("cpus", 1)),
-                memory_mb=int(n.get("memory_mb", 1024)),
+                memory_mb=int(n.get("memory_mb", n.get("memory_gb", 1.024) * 1000)),
                 gpus=int(n.get("gpus", 0)),
             )
             for n in node_configs_raw
@@ -68,6 +71,8 @@ class Config:
         return cls(
             poll_interval=raw.get("poll_interval", 15.0),
             log_level=raw.get("log_level", "INFO"),
+            log_mode=raw.get("log_mode", "stdout"),
+            log_file=raw.get("log_file", ""),
             work_queue=WorkQueueConfig(
                 backend=wk.get("backend", "condor_python"),
                 schedd_name=wk.get("schedd_name", ""),
