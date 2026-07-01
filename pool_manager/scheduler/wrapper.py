@@ -1,12 +1,12 @@
 import logging
 from pathlib import Path
 
-from pool_manager.scheduler.base import HPCScheduler, JobInfo, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, SchedulerBackend
 
 log = logging.getLogger("pool_manager.scheduler.wrapper")
 
 
-class SchedulerWrapper(HPCScheduler):
+class SchedulerWrapper(SchedulerBackend):
     def __init__(self, backend: SchedulerBackend):
         self._backend = backend
 

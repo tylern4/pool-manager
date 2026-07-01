@@ -1,4 +1,4 @@
-from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
 from pool_manager.scheduler.wrapper import SchedulerWrapper
 
 
@@ -30,7 +30,7 @@ class TestSchedulerWrapper:
     def test_implements_hpc_scheduler(self):
         backend = _FakeSchedulerBackend()
         sched = SchedulerWrapper(backend=backend)
-        assert isinstance(sched, HPCScheduler)
+        assert isinstance(sched, SchedulerBackend)
 
     def test_submit_delegates(self):
         backend = _FakeSchedulerBackend()

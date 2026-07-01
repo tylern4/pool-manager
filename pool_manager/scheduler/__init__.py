@@ -1,5 +1,4 @@
 from pool_manager.scheduler.base import (
-    HPCScheduler,
     JobInfo,
     JobState,
     NodeConfig,
@@ -14,7 +13,6 @@ from pool_manager.scheduler.slurm_subprocess import SlurmSubprocessBackend
 from pool_manager.scheduler.wrapper import SchedulerWrapper
 
 __all__ = [
-    "HPCScheduler",
     "NodeConfig",
     "SchedulerBackend",
     "SchedulerWrapper",

@@ -1,4 +1,4 @@
-# Pool Manager: HTCondor + HPCScheduler Bridge
+# Pool Manager: HTCondor + SchedulerBackend Bridge
 
 ## Overview
 
@@ -13,23 +13,28 @@ The entire system is built on pluggable abstract base classes so any component (
 │                    PoolManager                       │
 │  (orchestrator — scaling loop, drain, health)        │
 │  ┌─────────────────┐    ┌─────────────────────────┐ │
-│  │   WorkQueue      │    │    HPCScheduler         │ │
-│  │  (abstract)      │    │   (abstract)            │ │
-│  └────────┬─────────┘    └──────────┬──────────────┘ │
-│           │                         │                │
-└───────────┼─────────────────────────┼────────────────┘
-            │                         │
-            ▼                         ▼
-  ┌─────────────────┐      ┌───────────────────────┐
-  │ CondorWorkQueue  │      │ SlurmScheduler         │
-  │  - PythonBindings│      │  - SubprocessBackend   │
-  │  - Subprocess    │      │  - RESTAPIBackend      │
-  │  - RESTAPI       │      └───────────────────────┘
-  └─────────────────┘      ┌───────────────────────┐
-                            │ PBSScheduler           │
-                            │  - SubprocessBackend   │
-                            │  - RESTAPIBackend      │
-                            └───────────────────────┘
+│  │   WorkQueue          │    │    SchedulerBackend     │ │
+│  │  (abstract)          │    │   (abstract)            │ │
+│  └────────┬─────────────┘    └──────────┬──────────────┘ │
+│           │                             │                │
+└───────────┼─────────────────────────────┼────────────────┘
+            │                             │
+            ▼                             ▼
+  ┌──────────────────────┐    ┌──────────────────────────┐
+  │ CondorWorkQueue       │    │ SchedulerWrapper         │
+  │  - PythonBackend      │    │  - wraps SchedulerBackend│
+  │  - SubprocessBackend  │    └──────────┬───────────────┘
+  │  - RESTAPIBackend     │               │
+  └──────────────────────┘               │
+                                          ▼
+                             ┌─────────────────────────────┐
+                             │ SlurmSubprocessBackend       │
+                             │ SlurmRESTAPIBackend          │
+                             │ SlurmSFAPIBackend            │
+                             │ PBSSubprocessBackend         │
+                             │ LocalSubprocessBackend       │
+                             │ HTCondorRESTAPIBackend       │
+                             └─────────────────────────────┘
 ```
 
 ## Abstract Base Classes
@@ -53,14 +58,14 @@ class WorkQueue(ABC):
 | `CondorWorkQueue(SubprocessBackend)` | `subprocess` calling `condor_q` | Parse CLI output when bindings aren't available |
 | `CondorWorkQueue(RESTAPIBackend)` | HTCondor REST API | HTTP client for HTCondor's REST API endpoint |
 
-### `HPCScheduler` (abstract)
+### `SchedulerBackend` (abstract)
 
-Manages worker jobs on the execution platform. Subclasses implement: submit, cancel, list active jobs.
+Manages worker jobs on the execution platform. Subclasses implement: submit, cancel, list active jobs, signal, name.
 
 ```python
-class HPCScheduler(ABC):
+class SchedulerBackend(ABC):
     @abstractmethod
-    def submit(self, script_path: str, args: dict) -> str: ...
+    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str: ...
     @abstractmethod
     def cancel(self, job_id: str) -> None: ...
     @abstractmethod
@@ -71,25 +76,29 @@ class HPCScheduler(ABC):
     def name(self) -> str: ...
 ```
 
-**Planned implementations:**
-| Class | Backend | Description |
+**Implemented backends:**
+| Class | Mechanism | Description |
 |---|---|---|
-| `SlurmScheduler(SubprocessBackend)` | `sbatch`/`scancel`/`squeue` | Standard CLI interface |
-| `SlurmScheduler(RESTAPIBackend)` | Slurm REST API v0.0.38+ | HTTP-based job management |
-| `PBSScheduler(SubprocessBackend)` | `qsub`/`qdel`/`qstat` | PBS/Torque CLI |
-| `LocalScheduler(SubprocessBackend)` | `Popen`/`kill` | Run workers as local processes (testing) |
+| `SlurmSubprocessBackend(SchedulerBackend)` | `sbatch`/`scancel`/`squeue` | Standard CLI interface |
+| `SlurmRESTAPIBackend(SchedulerBackend)` | Slurm REST API v0.0.38+ | HTTP-based job management |
+| `SlurmSFAPIBackend(SchedulerBackend)` | NERSC SFAPI | Perlmutter (NERSC) |
+| `PBSSubprocessBackend(SchedulerBackend)` | `qsub`/`qdel`/`qstat` | PBS/Torque CLI |
+| `LocalSubprocessBackend(SchedulerBackend)` | `Popen`/`kill` | Run workers as local processes (testing) |
+| `HTCondorRESTAPIBackend(SchedulerBackend)` | HTCondor REST API | HTCondor as scheduler |
+
+A `SchedulerWrapper(SchedulerBackend)` provides simple delegation for logging and indirection without changing the backend interface.
 
 ### `PoolManager`
 
-The core coordinator. Composes a `WorkQueue` + `HPCScheduler`.
+The core coordinator. Composes a `WorkQueue` + `SchedulerBackend`.
 
 ```python
 class PoolManager:
-    def __init__(self, work_queue: WorkQueue,
-                 scheduler: HPCScheduler,
-                 config: Config): ...
+    def __init__(self, config: Config, work_queue: WorkQueue,
+                 scheduler: SchedulerBackend): ...
 
-    async def run(self): ...   # main loop
+    def run(self): ...         # main loop
+    def _tick(self): ...       # poll + reconcile + scale
     def _scale(self): ...      # scale decision
     def _drain(self): ...      # graceful drain protocol
 ```
@@ -98,7 +107,7 @@ class PoolManager:
 
 ```
 ┌────────────────────────┐      ┌───────────────────────────┐
-│   HTCondor Schedd      │      │   HPCScheduler Cluster    │
+│   HTCondor Schedd      │      │   HPC Cluster             │
 │                        │      │                           │
 │  ┌──────────────────┐  │      │  pool-manager             │
 │  │ CondorWorkQueue   │◄─┼──────┼──► (PoolManager)          │
@@ -133,27 +142,34 @@ class CondorSubprocessBackend(CondorBackend): ...
 class CondorRESTAPIBackend(CondorBackend): ...
 ```
 
-Same for `HPCScheduler` → `SchedulerBackend`:
+Same delegation pattern for `SchedulerWrapper` → backend:
 
 ```python
-class SlurmScheduler(HPCScheduler):
+class SchedulerWrapper(SchedulerBackend):
     def __init__(self, backend: SchedulerBackend):
         self._backend = backend
+    def submit(self, script_path, submit_args):
+        return self._backend.submit(script_path, submit_args)
+    # ... delegates cancel, list_active, signal, name
 
 class SchedulerBackend(ABC):
     @abstractmethod
-    def submit(self, ...) -> str: ...
+    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str: ...
     @abstractmethod
-    def cancel(self, ...) -> None: ...
+    def cancel(self, job_id: str) -> None: ...
     @abstractmethod
-    def list_active(self, ...) -> list[JobInfo]: ...
+    def list_active(self) -> list[JobInfo]: ...
     @abstractmethod
-    def signal(self, ...) -> None: ...
+    def signal(self, job_id: str, sig: str) -> None: ...
+    @abstractmethod
+    def name(self) -> str: ...
 
 class SlurmSubprocessBackend(SchedulerBackend): ...
 class SlurmRESTAPIBackend(SchedulerBackend): ...
+class SlurmSFAPIBackend(SchedulerBackend): ...
 class PBSSubprocessBackend(SchedulerBackend): ...
 class LocalSubprocessBackend(SchedulerBackend): ...
+class HTCondorRESTAPIBackend(SchedulerBackend): ...
 ```
 
 ## Pool Manager Config (`pool-manager.yaml`)
@@ -172,7 +188,7 @@ work_queue:
   # Backend-specific options (e.g. schedd_name, constraint, rest_url, token)
 
 scheduler:
-  backend: slurm_subprocess  # slurm_subprocess | slurm_rest | pbs_subprocess | local
+  backend: slurm_subprocess  # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess | local_subprocess | htcondor_rest
   worker_script: /path/to/htcondor_worker.sh
   submit_args:
     partition: defq
@@ -191,71 +207,83 @@ pool-manager/
 │   ├── __init__.py
 │   ├── __main__.py          # entry point
 │   ├── config.py            # config loading (pydantic/dataclass)
+│   ├── log.py               # logging setup
 │   ├── manager.py           # PoolManager — main loop
+│   ├── placement.py         # PlacementPlanner — node-aware bin-packing
+│   ├── scaling.py           # ScalingPolicy (config object + decision logic)
 │   ├── work_queue/
 │   │   ├── __init__.py
-│   │   ├── base.py          # WorkQueue ABC, Backend ABC (for Condor)
+│   │   ├── base.py          # WorkQueue ABC, CondorBackend ABC
+│   │   ├── condor.py        # CondorWorkQueue
 │   │   ├── condor_python.py
 │   │   ├── condor_subprocess.py
 │   │   └── condor_rest.py
-│   ├── scheduler/
-│   │   ├── __init__.py
-│   │   ├── base.py          # HPCScheduler ABC, SchedulerBackend ABC
-│   │   ├── slurm_subprocess.py
-│   │   ├── slurm_rest.py
-│   │   ├── pbs_subprocess.py
-│   │   └── local_subprocess.py
-│   └── scaling.py           # ScalingPolicy (config object + decision logic)
+│   └── scheduler/
+│       ├── __init__.py
+│       ├── base.py          # SchedulerBackend ABC, JobState, JobInfo, NodeConfig
+│       ├── wrapper.py       # SchedulerWrapper (delegation wrapper)
+│       ├── slurm_subprocess.py
+│       ├── slurm_rest.py
+│       ├── slurm_sfapi.py
+│       ├── pbs_subprocess.py
+│       ├── local_subprocess.py
+│       └── htcondor_rest.py
 ├── pool-manager.yaml        # config file
 ├── pool-manager.service     # systemd unit
-└── PLANS.md
+├── README.md
+├── PLAN.md
+└── AGENTS.md
 ```
 
 ## Implementation Plan (TODOs)
 
-- [ ] **1. Set up project structure**
+- [x] **1. Set up project structure**
   - Directory layout, `__init__.py` files, `pyproject.toml` / `setup.py`
   - Dev dependencies: `pytest`, `mypy`, `ruff`
 
-- [ ] **2. Implement `WorkQueue` + `CondorBackend` hierarchy**
-  - `WorkQueue` ABC with `count_idle()`
-  - `CondorBackend` ABC
+- [x] **2. Implement `WorkQueue` + `CondorBackend` hierarchy**
+  - `WorkQueue` ABC with `list_idle()`
+  - `CondorWorkQueue` — orchestrates backend
   - `CondorPythonBackend` — `htcondor` bindings
   - `CondorSubprocessBackend` — `subprocess.run(["condor_q", ...])`
   - `CondorRESTAPIBackend` — HTTP client for HTCondor REST API
 
-- [ ] **3. Implement `HPCScheduler` + `SchedulerBackend` hierarchy**
-  - `HPCScheduler` ABC with `submit()`, `cancel()`, `list_active()`, `signal()`
-  - `SchedulerBackend` ABC
+- [x] **3. Implement `SchedulerBackend` hierarchy**
+  - `SchedulerBackend` ABC with `submit()`, `cancel()`, `list_active()`, `signal()`, `name()`
   - `SlurmSubprocessBackend` — `sbatch`/`scancel`/`squeue`/`scancel --signal`
   - `SlurmRESTAPIBackend` — HTTP client for Slurm REST API
+  - `SlurmSFAPIBackend` — NERSC SFAPI for Perlmutter
   - `PBSSubprocessBackend` — `qsub`/`qdel`/`qstat`
   - `LocalSubprocessBackend` — local `Popen` for testing
+  - `HTCondorRESTAPIBackend` — HTCondor REST API
+  - `SchedulerWrapper` — delegation wrapper
 
-- [ ] **4. Implement config loading (`Config`)**
+- [x] **4. Implement config loading (`Config`)**
   - YAML → validated dataclass/Pydantic model
   - Select backend classes by string name
+  - `node_configs`, `task_resources` for placement
 
-- [ ] **5. Implement `PoolManager` core loop**
+- [x] **5. Implement `PoolManager` core loop**
   - Poll work queue → compute target pool size
   - Scale up: submit new scheduler jobs
   - Scale down: start graceful drain of excess workers
   - Track job states (submitted, running, draining, exited, lost)
   - Cooldown timers, hysteresis
+  - Node-aware placement via `PlacementPlanner`
 
-- [ ] **6. Implement graceful drain protocol**
+- [x] **6. Implement graceful drain protocol**
   - SIGTERM excess/idle workers
   - Wait `drain_timeout`, then `cancel` remaining
   - Abort drain if new work arrives
   - Signal handling on daemon itself (SIGINT/SIGTERM → drain all then exit)
 
-- [ ] **7. Error handling and recovery**
+- [x] **7. Error handling and recovery**
   - Daemon restart: reconcile via `list_active()`
   - Queue connection failures: backoff, preserve pool
   - Scheduler failures: retry, log, don't crash
   - Stale jobs: periodic `list_active()` reconciliation
 
-- [ ] **8. Configuration file and documentation**
+- [x] **8. Configuration file and documentation**
   - `pool-manager.yaml` with all options documented
   - Systemd service file
   - README with setup, test procedure, and examples
