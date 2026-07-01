@@ -20,7 +20,7 @@ from pool_manager.scheduler import (
     SlurmSFAPIBackend,
     SlurmSubprocessBackend,
 )
-from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState, parse_config_name
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, parse_config_name
 from pool_manager.work_queue import (
     CondorPythonBackend,
     CondorRESTAPIBackend,
@@ -51,7 +51,7 @@ def _make_work_queue(cfg) -> WorkQueue:
     return CondorWorkQueue(backend=backend, constraint=wk.constraint)
 
 
-def _make_scheduler(cfg) -> HPCScheduler:
+def _make_scheduler(cfg) -> SchedulerBackend:
     sch = cfg.scheduler
     user = sch.user or os.environ.get("USER", "")
     job_name_prefix = sch.job_name_prefix
@@ -99,7 +99,7 @@ def _make_scheduler(cfg) -> HPCScheduler:
 
 
 class PoolManager:
-    def __init__(self, config: Config, work_queue: WorkQueue, scheduler: HPCScheduler):
+    def __init__(self, config: Config, work_queue: WorkQueue, scheduler: SchedulerBackend):
         self._config = config
         self._wq = work_queue
         self._sched = scheduler
@@ -261,9 +261,14 @@ class PoolManager:
             self._signal_workers(excess, plan=plan)
             self._last_scale_down = now
 
-            if self._draining_count() > 0 and self._policy.drain_timeout > 0:
+            can_force = (
+                self._draining_count() > 0
+                and self._policy.drain_timeout > 0
+                and self._drain_start is not None
+            )
+            if can_force:
                 deadline = self._drain_start + self._policy.drain_timeout
-                if now > deadline and self._config.scale_down_cooldown > 0:
+                if now > deadline and self._policy.scale_down_cooldown > 0:
                     self._force_cancel_draining()
 
         elif self._daemon_shutdown:

@@ -77,3 +77,12 @@ class TestLogging:
 
     def test_log_mode_constants(self):
         assert LOG_MODES == {"stdout", "file", "both"}
+
+    def test_trace_logs_when_enabled(self):
+        logger = setup_logging("TRACE")
+        assert logger.isEnabledFor(TRACE)
+        logger.trace("trace message")  # should not raise
+
+    def test_trace_does_not_log_when_disabled(self):
+        logger = setup_logging("INFO")
+        logger.trace("should not appear")  # should not raise

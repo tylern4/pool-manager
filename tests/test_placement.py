@@ -318,3 +318,154 @@ class TestPlanForTasks:
         placements = p.plan_for_tasks(tasks)
         total = sum(pl.count for pl in placements)
         assert total <= 2
+
+
+class TestPlanEdgeCases:
+    def test_plan_max_workers_limit_hit(self):
+        nc = [
+            NodeConfig(name="small", cpus=1, memory_mb=1024),
+            NodeConfig(name="big", cpus=16, memory_mb=65536),
+        ]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024),
+            max_workers=2,
+        )
+        placements = p.plan(10)
+        total = sum(pl.count for pl in placements)
+        assert total <= 2
+
+    def test_plan_nodes_needed_zero_skipped(self):
+        nc = [NodeConfig(name="small", cpus=1, memory_mb=1024)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024),
+            max_workers=0,
+        )
+        placements = p.plan(5)
+        assert placements == []
+
+    def test_plan_node_cannot_fit_any_task(self):
+        nc = [NodeConfig(name="tiny", cpus=1, memory_mb=512)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=2, memory_mb=4096),
+        )
+        placements = p.plan(1)
+        assert placements == []  # falls to _min_plan which is empty
+
+    def test_plan_gpu_task_no_gpu_node_skips(self):
+        nc = [NodeConfig(name="gpu", cpus=4, memory_mb=8192, gpus=0)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024, gpus=1),
+        )
+        placements = p.plan(1)
+        assert placements == []
+
+    def test_plan_no_placements_falls_to_min_plan(self):
+        nc = [NodeConfig(name="small", cpus=2, memory_mb=2048)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=8, memory_mb=16384),
+            min_workers=2,
+        )
+        placements = p.plan(1)
+        # Tasks can't fit, so falls to _min_plan with 2 min workers
+        assert len(placements) == 1
+        assert placements[0].count == 2
+
+    def test_plan_task_too_large_for_gpu_node_skips(self):
+        nc = [
+            NodeConfig(name="gpu", cpus=1, memory_mb=1024, gpus=1),
+        ]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=2, memory_mb=2048, gpus=1),
+        )
+        placements = p.plan(1)
+        assert placements == []
+
+    def test_plan_remaining_tasks_warning(self, caplog):
+        nc = [NodeConfig(name="small", cpus=1, memory_mb=1024)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024),
+            max_workers=1,
+        )
+        with caplog.at_level("WARNING"):
+            p.plan(10)
+        assert any("Could not place all" in rec.message for rec in caplog.records)
+
+    def test_plan_for_tasks_skips_gpu_node_for_cpu_task(self):
+        nc = [
+            NodeConfig(name="gpu", cpus=4, memory_mb=8192, gpus=1),
+            NodeConfig(name="cpu", cpus=4, memory_mb=8192, gpus=0),
+        ]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=0)]
+        placements = p.plan_for_tasks(tasks)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "cpu"
+
+    def test_plan_for_tasks_cannot_place_any(self, caplog):
+        nc = [NodeConfig(name="small", cpus=1, memory_mb=512)]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=8, memory_mb=16384)]
+        with caplog.at_level("WARNING"):
+            placements = p.plan_for_tasks(tasks)
+        assert placements == []
+
+    def test_plan_for_tasks_unplaceable_due_to_gpu(self, caplog):
+        nc = [NodeConfig(name="cpu", cpus=16, memory_mb=65536, gpus=0)]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=1)]
+        with caplog.at_level("WARNING"):
+            placements = p.plan_for_tasks(tasks)
+        assert placements == []
+
+    def test_plan_for_tasks_max_workers_exceeded(self, caplog):
+        nc = [NodeConfig(name="big", cpus=16, memory_mb=65536)]
+        p = PlacementPlanner(node_configs=nc, max_workers=1)
+        tasks = [TaskResources(cpus=1, memory_mb=1024)] * 20
+        with caplog.at_level("WARNING"):
+            placements = p.plan_for_tasks(tasks)
+        total = sum(pl.count for pl in placements)
+        assert total <= 1
+
+    def test_tasks_fit_on_node_mem_overflow(self):
+        nc = NodeConfig(name="small", cpus=4, memory_mb=2048)
+        tasks = [TaskResources(cpus=1, memory_mb=4096)]
+        assert not PlacementPlanner._tasks_fit_on_node(nc, tasks)
+
+    def test_tasks_fit_on_node_gpu_overflow(self):
+        nc = NodeConfig(name="small", cpus=4, memory_mb=8192, gpus=1)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=2)]
+        assert not PlacementPlanner._tasks_fit_on_node(nc, tasks)
+
+    def test_tasks_fit_on_node_no_gpu_on_node(self):
+        nc = NodeConfig(name="small", cpus=4, memory_mb=8192, gpus=0)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=1)]
+        assert not PlacementPlanner._tasks_fit_on_node(nc, tasks)
+
+    def test_min_plan_with_all_gpu_configs_uses_first(self):
+        nc = [NodeConfig(name="gpu1", cpus=4, memory_mb=8192, gpus=1)]
+        p = PlacementPlanner(node_configs=nc, min_workers=2, max_workers=16)
+        placements = p._min_plan()
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "gpu1"
+
+    def test_plan_for_tasks_empty_with_min_workers_and_gpu_configs(self):
+        nc = [NodeConfig(name="gpu1", cpus=4, memory_mb=8192, gpus=1)]
+        p = PlacementPlanner(node_configs=nc, min_workers=2, max_workers=16)
+        placements = p.plan_for_tasks([])
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "gpu1"
+
+    def test_plan_for_tasks_cpu_only_on_gpu_config(self):
+        nc = [NodeConfig(name="gpu1", cpus=4, memory_mb=8192, gpus=1)]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=0)]
+        # GPU-only node is skipped for CPU tasks in plan_for_tasks (line 214)
+        placements = p.plan_for_tasks(tasks)
+        assert placements == []

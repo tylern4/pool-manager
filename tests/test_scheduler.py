@@ -1,4 +1,12 @@
-from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState, SchedulerBackend
+import re
+
+from pool_manager.scheduler.base import (
+    JobInfo,
+    JobState,
+    SchedulerBackend,
+    _test_job_id,
+    parse_config_name,
+)
 from pool_manager.scheduler.wrapper import SchedulerWrapper
 
 
@@ -30,7 +38,7 @@ class TestSchedulerWrapper:
     def test_implements_hpc_scheduler(self):
         backend = _FakeSchedulerBackend()
         sched = SchedulerWrapper(backend=backend)
-        assert isinstance(sched, HPCScheduler)
+        assert isinstance(sched, SchedulerBackend)
 
     def test_submit_delegates(self):
         backend = _FakeSchedulerBackend()
@@ -65,3 +73,26 @@ class TestSchedulerWrapper:
         backend = _FakeSchedulerBackend()
         sched = SchedulerWrapper(backend=backend)
         assert sched.name() == "fake_backend"
+
+
+class TestSchedulerBase:
+    def test_parse_config_name_with_prefix(self):
+        assert parse_config_name("htcondor_worker_big", "htcondor_worker_") == "big"
+
+    def test_parse_config_name_without_prefix(self):
+        assert parse_config_name("other_job", "htcondor_worker_") == "default"
+
+    def test_test_job_id_format(self):
+        job_id = _test_job_id()
+        assert re.match(r"test_\d+_\d+", job_id)
+
+    def test_job_info_default_job_name(self):
+        ji = JobInfo(job_id="42", state=JobState.RUNNING)
+        assert ji.job_name == ""
+
+    def test_job_state_values(self):
+        assert JobState.RUNNING.value == "running"
+        assert JobState.PENDING.value == "pending"
+        assert JobState.DRAINING.value == "draining"
+        assert JobState.EXITED.value == "exited"
+        assert JobState.UNKNOWN.value == "unknown"

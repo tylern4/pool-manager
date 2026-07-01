@@ -41,3 +41,11 @@ class TestScalingPolicy:
         assert sp.target_size(3) == 1
         assert sp.target_size(4) == 2
         assert sp.target_size(30) == 10
+
+    def test_placement_planner_property(self):
+        sp = ScalingPolicy(min_workers=1, max_workers=8, batch_size=4)
+        pp = sp.placement_planner
+        assert pp._batch_size == 4
+        assert pp._max_workers == 8
+        assert pp._min_workers == 1
+        assert pp._node_configs == []

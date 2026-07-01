@@ -47,3 +47,34 @@ class TestCondorWorkQueue:
         wq = CondorWorkQueue(backend=backend)
         assert wq.count_idle() == 5
         assert backend.called_with_constraint == ""
+
+    def test_list_idle_returns_task_list(self):
+        backend = _FakeCondorBackend(count=3)
+        wq = CondorWorkQueue(backend=backend)
+        tasks = wq.list_idle()
+        assert len(tasks) == 3
+        assert all(t.cpus == 1.0 for t in tasks)
+
+    def test_list_idle_empty(self):
+        backend = _FakeCondorBackend(count=0)
+        wq = CondorWorkQueue(backend=backend)
+        tasks = wq.list_idle()
+        assert tasks == []
+
+    def test_list_idle_passes_constraint(self):
+        backend = _FakeCondorBackend()
+        wq = CondorWorkQueue(backend=backend, constraint="JobStatus == 5")
+        wq.list_idle()
+        assert backend.called_with_constraint == "JobStatus == 5"
+
+
+class TestCondorWorkQueueTraceLogging:
+    def test_list_idle_trace_logging(self, caplog):
+        from pool_manager.log import TRACE
+
+        backend = _FakeCondorBackend(count=2)
+        wq = CondorWorkQueue(backend=backend)
+        with caplog.at_level(TRACE, logger="pool_manager.work_queue.condor"):
+            tasks = wq.list_idle()
+        assert len(tasks) == 2
+        assert any("Task: cpus=" in rec.message for rec in caplog.records)

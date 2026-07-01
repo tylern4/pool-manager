@@ -80,3 +80,44 @@ class TestLocalSubprocessBackend:
     def test_name(self):
         backend = LocalSubprocessBackend()
         assert "local_subprocess" in backend.name()
+
+    def test_test_mode_submit(self):
+        backend = LocalSubprocessBackend(test_mode=True)
+        job_id = backend.submit("/fake/script.sh", {"arg": "val"})
+        assert job_id.startswith("test_")
+
+    def test_submit_with_env_args(self):
+        backend = LocalSubprocessBackend()
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
+            f.write("#!/bin/bash\nsleep 0.01\n")
+            script = f.name
+        Path(script).chmod(0o755)
+        try:
+            job_id = backend.submit(script, {"custom_arg": "custom_val"})
+            assert job_id is not None
+        finally:
+            backend.cancel(job_id)
+            Path(script).unlink(missing_ok=True)
+
+    def test_test_mode_cancel(self):
+        backend = LocalSubprocessBackend(test_mode=True)
+        backend.cancel("test_123")
+        # Should not raise
+
+    def test_test_mode_signal(self):
+        backend = LocalSubprocessBackend(test_mode=True)
+        backend.signal("test_123", "SIGTERM")
+        # Should not raise
+
+    def test_cancel_nonexistent(self):
+        backend = LocalSubprocessBackend()
+        backend.cancel("nonexistent")
+        # Should not raise
+
+    def test_signal_nonexistent(self):
+        backend = LocalSubprocessBackend()
+        backend.signal("nonexistent", "SIGTERM")
+        # Should not raise
