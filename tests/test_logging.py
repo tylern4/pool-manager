@@ -1,6 +1,6 @@
 import logging
-import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -34,15 +34,14 @@ class TestLogging:
         try:
             logger = setup_logging("INFO", log_mode="file", log_file=log_path)
             assert len(logger.handlers) == 1
-            assert os.path.exists(log_path)
+            assert Path(log_path).exists()
             logger.info("file test")
             logger.handlers[0].flush()
-            with open(log_path) as f2:
-                content = f2.read()
+            content = Path(log_path).read_text()
             assert "[INFO]" in content
             assert "file test" in content
         finally:
-            os.unlink(log_path)
+            Path(log_path).unlink()
 
     def test_both_mode_has_two_handlers(self):
         with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as f:
@@ -50,9 +49,9 @@ class TestLogging:
         try:
             logger = setup_logging("INFO", log_mode="both", log_file=log_path)
             assert len(logger.handlers) == 2
-            assert os.path.exists(log_path)
+            assert Path(log_path).exists()
         finally:
-            os.unlink(log_path)
+            Path(log_path).unlink()
 
     def test_file_output_is_plain_not_colored(self):
         with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as f:
@@ -61,11 +60,10 @@ class TestLogging:
             logger = setup_logging("INFO", log_mode="file", log_file=log_path)
             logger.info("no color here")
             logger.handlers[0].flush()
-            with open(log_path) as f2:
-                content = f2.read()
+            content = Path(log_path).read_text()
             assert "\x1b[" not in content
         finally:
-            os.unlink(log_path)
+            Path(log_path).unlink()
 
     def test_invalid_mode_raises(self):
         with pytest.raises(ValueError, match="Invalid log_mode"):

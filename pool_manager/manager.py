@@ -2,6 +2,7 @@ import logging
 import os
 import signal
 import time
+from pathlib import Path
 
 try:
     import htcondor
@@ -342,6 +343,10 @@ class PoolManager:
         if not script:
             log.error("Cannot start workers: no worker_script configured")
             return
+        script_path = Path(script)
+        if not script_path.exists():
+            log.error("Worker script not found: %s", script)
+            return
         log.debug("Starting %d worker(s) via %s", count, script)
         prefix = self._config.scheduler.job_name_prefix
         for i in range(count):
@@ -359,6 +364,10 @@ class PoolManager:
         script = self._config.scheduler.worker_script
         if not script:
             log.error("Cannot start workers: no worker_script configured")
+            return
+        script_path = Path(script)
+        if not script_path.exists():
+            log.error("Worker script not found: %s", script)
             return
         log.debug("Starting %d worker(s) from placement plan", count)
         prefix = self._config.scheduler.job_name_prefix

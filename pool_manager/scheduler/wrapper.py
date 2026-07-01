@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from pool_manager.scheduler.base import HPCScheduler, JobInfo, SchedulerBackend
 
@@ -9,7 +10,7 @@ class SchedulerWrapper(HPCScheduler):
     def __init__(self, backend: SchedulerBackend):
         self._backend = backend
 
-    def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
+    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str:
         log.debug("Submitting via %s", self._backend.name())
         return self._backend.submit(script_path, submit_args)
 

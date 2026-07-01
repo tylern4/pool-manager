@@ -5,6 +5,7 @@ except ImportError:
 
 import logging
 import os
+from pathlib import Path
 
 from pool_manager.log import TRACE
 from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
@@ -46,8 +47,10 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             )
             return job_id
 
-        with open(script_path) as f:
-            script_content = f.read()
+        script_path_p = Path(script_path)
+        if not script_path_p.exists():
+            raise FileNotFoundError(f"Worker script not found: {script_path}")
+        script_content = script_path_p.read_text()
 
         payload = {"script": script_content}
         if submit_args:

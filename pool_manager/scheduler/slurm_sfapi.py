@@ -57,8 +57,10 @@ class SlurmSFAPIBackend(SchedulerBackend):
 
         compute = self._compute()
 
-        with open(script_path) as f:
-            script_content = f.read()
+        script_path_p = Path(script_path)
+        if not script_path_p.exists():
+            raise FileNotFoundError(f"Worker script not found: {script_path}")
+        script_content = script_path_p.read_text()
 
         sbatch_lines = []
         for key, val in submit_args.items():

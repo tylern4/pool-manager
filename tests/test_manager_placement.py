@@ -45,7 +45,7 @@ def make_config(node_configs=None, **overrides):
         work_queue=WorkQueueConfig(backend="condor_subprocess"),
         scheduler=SchedulerConfig(
             backend="local_subprocess",
-            worker_script="/fake/worker.sh",
+            worker_script=overrides.get("worker_script", "/fake/worker.sh"),
             node_configs=node_configs or [],
             submit_args={"account": "myproject"},
         ),
@@ -67,21 +67,27 @@ class TestManagerPlacement:
         assert mgr._has_node_configs is True
         assert len(mgr._planner._node_configs) == 1
 
-    def test_start_workers_simple_no_configs(self, mock_scheduler, mock_work_queue):
-        cfg = make_config()
+    def test_start_workers_simple_no_configs(self, mock_scheduler, mock_work_queue, tmp_path):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        cfg = make_config(worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         plan = [Placement(node_config=NodeConfig(name="default"), count=3)]
         mgr._start_workers(plan, 3)
         assert mock_scheduler.submit.call_count == 3
         for call in mock_scheduler.submit.call_args_list:
             args, kwargs = call
-            assert args[0] == "/fake/worker.sh"
+            assert args[0] == str(script)
             assert args[1]["account"] == "myproject"
             assert args[1]["job-name"] == "htcondor_worker_default"
 
-    def test_start_workers_from_plan_adds_resource_args(self, mock_scheduler, mock_work_queue):
+    def test_start_workers_from_plan_adds_resource_args(
+        self, mock_scheduler, mock_work_queue, tmp_path
+    ):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
         ncs = [NodeConfig(name="big", cpus=16, memory_mb=65536, gpus=0)]
-        cfg = make_config(node_configs=ncs)
+        cfg = make_config(node_configs=ncs, worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 8)
         mgr._start_workers(plan, 1)
@@ -92,9 +98,11 @@ class TestManagerPlacement:
         assert submit_args["mem"] == "65536M"
         assert "gpus" not in submit_args
 
-    def test_start_workers_from_plan_with_gpus(self, mock_scheduler, mock_work_queue):
+    def test_start_workers_from_plan_with_gpus(self, mock_scheduler, mock_work_queue, tmp_path):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
         ncs = [NodeConfig(name="gpu", cpus=4, memory_mb=8192, gpus=4)]
-        cfg = make_config(node_configs=ncs)
+        cfg = make_config(node_configs=ncs, worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024, gpus=1)] * 4)
         mgr._start_workers(plan, 1)
@@ -102,14 +110,20 @@ class TestManagerPlacement:
         _script, submit_args = call[0]
         assert submit_args["gpus"] == "4"
 
-    def test_tick_uses_target_from_planner(self, mock_scheduler, mock_work_queue):
+    def test_tick_uses_target_from_planner(self, mock_scheduler, mock_work_queue, tmp_path):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
         ncs = [NodeConfig(name="small", cpus=4, memory_mb=8192)]
-        cfg = make_config(node_configs=ncs)
+        cfg = make_config(node_configs=ncs, worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         mgr._tick()
         assert mock_scheduler.submit.called
 
-    def test_start_workers_from_plan_with_node_submit_args(self, mock_scheduler, mock_work_queue):
+    def test_start_workers_from_plan_with_node_submit_args(
+        self, mock_scheduler, mock_work_queue, tmp_path
+    ):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
         ncs = [
             NodeConfig(
                 name="big",
@@ -119,7 +133,7 @@ class TestManagerPlacement:
                 submit_args={"partition": "highmem"},
             ),
         ]
-        cfg = make_config(node_configs=ncs)
+        cfg = make_config(node_configs=ncs, worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 4)
         mgr._start_workers(plan, 1)
@@ -130,8 +144,10 @@ class TestManagerPlacement:
         assert submit_args["cpus-per-task"] == "16"
 
     def test_start_workers_from_plan_node_submit_args_per_type(
-        self, mock_scheduler, mock_work_queue
+        self, mock_scheduler, mock_work_queue, tmp_path
     ):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
         ncs = [
             NodeConfig(
                 name="gpu",
@@ -142,7 +158,7 @@ class TestManagerPlacement:
             ),
             NodeConfig(name="cpu", cpus=16, memory_mb=65536, gpus=0),
         ]
-        cfg = make_config(node_configs=ncs)
+        cfg = make_config(node_configs=ncs, worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         mgr._planner._task_resources = TaskResources(cpus=1, memory_mb=1024, gpus=1)
         plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024, gpus=1)] * 4)
@@ -174,8 +190,10 @@ class TestManagerPlacement:
 
 
 class TestSignalWorkers:
-    def test_tracks_node_assignments_on_start(self, mock_scheduler, mock_work_queue):
-        cfg = make_config()
+    def test_tracks_node_assignments_on_start(self, mock_scheduler, mock_work_queue, tmp_path):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        cfg = make_config(worker_script=str(script))
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         mock_scheduler.submit.side_effect = ["101", "102"]
         mgr._start_workers_simple(2)

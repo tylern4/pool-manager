@@ -105,8 +105,11 @@ def _run_test_strategy(args):
     ncs = config.scheduler.node_configs
     policy = config.scaling
 
-    with open(args.json_file) as f:
-        raw = json.load(f)
+    json_path = Path(args.json_file)
+    if not json_path.exists():
+        print(f"Error: JSON file not found: {args.json_file}", file=sys.stderr)
+        sys.exit(1)
+    raw = json.loads(json_path.read_text())
 
     if not isinstance(raw, list):
         print("Error: JSON file must contain a list of job classads", file=sys.stderr)

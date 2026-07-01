@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,10 +54,10 @@ class TestSlurmSFAPIBackend:
         mock_compute.submit_job.return_value = mock_job
 
         backend = SlurmSFAPIBackend(machine="perlmutter", user="testuser")
-        with patch("builtins.open") as mock_open:
-            read_mock = mock_open.return_value.__enter__.return_value.read
-            read_mock.return_value = "#!/bin/bash\necho hello"
-
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", return_value="#!/bin/bash\necho hello"),
+        ):
             job_id = backend.submit("/fake/script.sh", {"partition": "debug"})
 
         assert job_id == "42"
@@ -70,10 +71,10 @@ class TestSlurmSFAPIBackend:
         mock_compute.submit_job.return_value = mock_job
 
         backend = SlurmSFAPIBackend(machine="perlmutter")
-        with patch("builtins.open") as mock_open:
-            read_mock = mock_open.return_value.__enter__.return_value.read
-            read_mock.return_value = "#!/bin/bash\necho hello"
-
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", return_value="#!/bin/bash\necho hello"),
+        ):
             backend.submit("/x.sh", {"account": "myproject", "time": "01:00:00"})
 
         script_arg = mock_compute.submit_job.call_args[0][0]
