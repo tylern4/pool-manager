@@ -1,9 +1,17 @@
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 import logging
+import os
 
 from pool_manager.log import TRACE
 from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 log = logging.getLogger("pool_manager.scheduler.slurm_rest")
+
+slurm_api_ver = os.getenv("SLURM_API_VER", "v0.0.38")
 
 
 class SlurmRESTAPIBackend(SchedulerBackend):
@@ -38,8 +46,6 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             )
             return job_id
 
-        import httpx
-
         with open(script_path) as f:
             script_content = f.read()
 
@@ -47,7 +53,7 @@ class SlurmRESTAPIBackend(SchedulerBackend):
         if submit_args:
             payload["job"] = submit_args
 
-        url = f"{self._url}/slurm/v0.0.38/job/submit"
+        url = f"{self._url}/slurm/{slurm_api_ver}/job/submit"
         log.debug("POST %s", url)
         resp = httpx.post(url, json=payload, headers=self._headers(), timeout=30)
         log.log(TRACE, "submit response: status=%d body=%s", resp.status_code, resp.text[:2000])
@@ -62,9 +68,7 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             log.info("[TEST] Would cancel job %s via REST", job_id)
             return
 
-        import httpx
-
-        url = f"{self._url}/slurm/v0.0.38/job/{job_id}"
+        url = f"{self._url}/slurm/{slurm_api_ver}/job/{job_id}"
         log.debug("DELETE %s", url)
         resp = httpx.delete(url, headers=self._headers(), timeout=30)
         log.log(TRACE, "cancel response: status=%d", resp.status_code)
@@ -72,9 +76,7 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             log.warning("Failed to cancel job %s via REST: HTTP %d", job_id, resp.status_code)
 
     def list_active(self) -> list[JobInfo]:
-        import httpx
-
-        url = f"{self._url}/slurm/v0.0.38/jobs"
+        url = f"{self._url}/slurm/{slurm_api_ver}/jobs"
         params: dict[str, str] = {}
         if self._user:
             params["user"] = self._user

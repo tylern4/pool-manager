@@ -1,3 +1,8 @@
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 import logging
 
 from pool_manager.log import TRACE
@@ -16,8 +21,6 @@ class CondorRESTAPIBackend(CondorBackend):
         return len(self.list_idle(constraint=constraint))
 
     def list_idle(self, constraint: str = "") -> list[TaskResources]:
-        import httpx
-
         headers = {}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"

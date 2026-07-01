@@ -2,6 +2,8 @@ import logging
 import os
 import tempfile
 
+import pytest
+
 from pool_manager.log import LOG_MODES, TRACE, setup_logging
 
 
@@ -66,8 +68,6 @@ class TestLogging:
             os.unlink(log_path)
 
     def test_invalid_mode_raises(self):
-        import pytest
-
         with pytest.raises(ValueError, match="Invalid log_mode"):
             setup_logging("INFO", log_mode="invalid")
 

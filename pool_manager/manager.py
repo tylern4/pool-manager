@@ -3,28 +3,39 @@ import os
 import signal
 import time
 
+try:
+    import htcondor
+except ImportError:
+    htcondor = None
+
 from pool_manager.config import Config
 from pool_manager.placement import Placement, PlacementPlanner, TaskResources
+from pool_manager.scheduler import (
+    HTCondorRESTAPIBackend,
+    LocalSubprocessBackend,
+    PBSSubprocessBackend,
+    SchedulerWrapper,
+    SlurmRESTAPIBackend,
+    SlurmSFAPIBackend,
+    SlurmSubprocessBackend,
+)
 from pool_manager.scheduler.base import HPCScheduler, JobInfo, JobState, parse_config_name
+from pool_manager.work_queue import (
+    CondorPythonBackend,
+    CondorRESTAPIBackend,
+    CondorSubprocessBackend,
+    CondorWorkQueue,
+)
 from pool_manager.work_queue.base import WorkQueue
 
 log = logging.getLogger("pool_manager.manager")
 
 
 def _make_work_queue(cfg) -> WorkQueue:
-    from pool_manager.work_queue import (
-        CondorPythonBackend,
-        CondorRESTAPIBackend,
-        CondorSubprocessBackend,
-        CondorWorkQueue,
-    )
-
     wk = cfg.work_queue
     match wk.backend:
         case "condor_python":
-            try:
-                import htcondor  # noqa: F401
-            except ImportError:
+            if htcondor is None:
                 log.warning("htcondor package not available, falling back to condor_subprocess")
                 backend = CondorSubprocessBackend(schedd_name=wk.schedd_name)
             else:
@@ -40,16 +51,6 @@ def _make_work_queue(cfg) -> WorkQueue:
 
 
 def _make_scheduler(cfg) -> HPCScheduler:
-    from pool_manager.scheduler import (
-        HTCondorRESTAPIBackend,
-        LocalSubprocessBackend,
-        PBSSubprocessBackend,
-        SchedulerWrapper,
-        SlurmRESTAPIBackend,
-        SlurmSFAPIBackend,
-        SlurmSubprocessBackend,
-    )
-
     sch = cfg.scheduler
     user = sch.user or os.environ.get("USER", "")
     job_name_prefix = sch.job_name_prefix

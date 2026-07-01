@@ -1,3 +1,8 @@
+try:
+    import htcondor
+except ImportError:
+    htcondor = None
+
 import logging
 
 from pool_manager.placement import TaskResources
@@ -14,8 +19,6 @@ class CondorPythonBackend(CondorBackend):
         return len(self.list_idle(constraint=constraint))
 
     def list_idle(self, constraint: str = "") -> list[TaskResources]:
-        import htcondor
-
         schedd = htcondor.Schedd(self._schedd_name) if self._schedd_name else htcondor.Schedd()
         projection = ["ClusterId", "RequestCpus", "RequestMemory", "RequestGpus"]
         log.debug(

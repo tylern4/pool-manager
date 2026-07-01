@@ -1,3 +1,8 @@
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 import logging
 
 from pool_manager.log import TRACE
@@ -24,8 +29,6 @@ class CondorRestClient:
         return h
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
-        import httpx
-
         payload = dict(submit_args)
         payload.setdefault("executable", script_path)
 
@@ -40,8 +43,6 @@ class CondorRestClient:
         return job_id
 
     def remove(self, job_id: str) -> None:
-        import httpx
-
         url = f"{self._url}/condor_rm/{job_id}"
         log.debug("DELETE %s", url)
         resp = httpx.delete(url, headers=self._headers(), timeout=30)
@@ -50,8 +51,6 @@ class CondorRestClient:
             log.warning("Failed to remove job %s via REST: HTTP %d", job_id, resp.status_code)
 
     def list_jobs(self, constraint: str = "") -> list[dict]:
-        import httpx
-
         url = f"{self._url}/condor_q"
         params: dict[str, str] = {}
         if constraint:

@@ -1,5 +1,11 @@
+import json
 import logging
 from pathlib import Path
+
+from sfapi_client import Client
+from sfapi_client._jobs import JobCommand
+from sfapi_client.compute import Machine
+from sfapi_client.jobs import JobState as SFApiJobState
 
 from pool_manager.log import TRACE
 from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
@@ -18,8 +24,6 @@ class SlurmSFAPIBackend(SchedulerBackend):
         job_name_prefix: str = "htcondor_worker_",
         test_mode: bool = False,
     ):
-        from sfapi_client import Client
-
         self._machine = machine
         self._user = user
         self._job_name_prefix = job_name_prefix
@@ -27,21 +31,14 @@ class SlurmSFAPIBackend(SchedulerBackend):
         self._client_kwargs: dict = {}
 
         if client_id and client_secret:
-            import json
-
-            from authlib.jose import JsonWebKey
-
             self._client_kwargs["client_id"] = client_id
-            self._client_kwargs["client_secret"] = JsonWebKey.import_key(json.loads(client_secret))
+            self._client_kwargs["client_secret"] = json.loads(client_secret)
         elif key_path:
             self._client_kwargs["key"] = Path(key_path)
 
         self._client = Client(**self._client_kwargs)
 
     def _compute(self, reuse_client: bool = True):
-        from sfapi_client import Client
-        from sfapi_client.compute import Machine
-
         client = self._client if reuse_client else Client(**self._client_kwargs)
         machine = Machine(self._machine)
         return client.compute(machine)
@@ -90,9 +87,6 @@ class SlurmSFAPIBackend(SchedulerBackend):
             log.info("[TEST] Would cancel job %s via SFAPI on %s", job_id, self._machine)
             return
 
-        from sfapi_client import Client
-        from sfapi_client.compute import Machine
-
         client = Client(**self._client_kwargs)
         compute = client.compute(Machine(self._machine))
         job = compute.job(jobid=job_id)
@@ -101,10 +95,6 @@ class SlurmSFAPIBackend(SchedulerBackend):
         log.debug("Cancelled job %s", job_id)
 
     def list_active(self) -> list[JobInfo]:
-        from sfapi_client import Client
-        from sfapi_client._jobs import JobCommand
-        from sfapi_client.compute import Machine
-
         client = Client(**self._client_kwargs)
         compute = client.compute(Machine(self._machine))
 
@@ -131,9 +121,6 @@ class SlurmSFAPIBackend(SchedulerBackend):
             log.info("[TEST] Would send signal %s to job %s via SFAPI", sig, job_id)
             return
 
-        from sfapi_client import Client
-        from sfapi_client.compute import Machine
-
         client = Client(**self._client_kwargs)
         compute = client.compute(Machine(self._machine))
         log.debug("Sending signal %s to job %s via SFAPI", sig, job_id)
@@ -149,8 +136,6 @@ class SlurmSFAPIBackend(SchedulerBackend):
 
 
 def _sfapi_to_jobstate(state) -> JobState:
-    from sfapi_client.jobs import JobState as SFApiJobState
-
     active_states = {
         SFApiJobState.PENDING,
         SFApiJobState.CONFIGURING,

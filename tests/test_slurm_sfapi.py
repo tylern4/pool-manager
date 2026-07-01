@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sfapi_client._jobs import JobCommand
+from sfapi_client.jobs import JobState as S
 
 from pool_manager.scheduler.base import JobState
 from pool_manager.scheduler.slurm_sfapi import SlurmSFAPIBackend, _sfapi_to_jobstate
@@ -8,45 +10,29 @@ from pool_manager.scheduler.slurm_sfapi import SlurmSFAPIBackend, _sfapi_to_jobs
 
 class TestSFApiJobStateMapping:
     def test_pending(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.PENDING) == JobState.PENDING
 
     def test_running(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.RUNNING) == JobState.RUNNING
 
     def test_configuring(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.CONFIGURING) == JobState.PENDING
 
     def test_completing(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.COMPLETING) == JobState.RUNNING
 
     def test_signaling(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.SIGNALING) == JobState.RUNNING
 
     def test_cancelled_is_unknown(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.CANCELLED) == JobState.UNKNOWN
 
     def test_completed_is_unknown(self):
-        from sfapi_client.jobs import JobState as S
-
         assert _sfapi_to_jobstate(S.COMPLETED) == JobState.UNKNOWN
 
 
 class TestSlurmSFAPIBackend:
     def make_mock_job(self, job_id: str, state_str: str = "PENDING"):
-        from sfapi_client.jobs import JobState as S
-
         job = MagicMock()
         job.jobid = job_id
         job.state = S(state_str)
@@ -54,7 +40,7 @@ class TestSlurmSFAPIBackend:
 
     @pytest.fixture
     def mock_client(self):
-        with patch("sfapi_client.Client") as mock_cls:
+        with patch("pool_manager.scheduler.slurm_sfapi.Client") as mock_cls:
             mock_instance = MagicMock()
             mock_compute = MagicMock()
             mock_instance.compute.return_value = mock_compute
@@ -123,8 +109,6 @@ class TestSlurmSFAPIBackend:
         assert jobs[1].state == JobState.PENDING
 
     def test_list_active_passes_user(self, mock_client):
-        from sfapi_client._jobs import JobCommand
-
         mock_cls, mock_instance, mock_compute = mock_client
         mock_compute.jobs.return_value = []
 
