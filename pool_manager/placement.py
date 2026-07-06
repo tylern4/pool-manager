@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from pool_manager.log import TRACE
 from pool_manager.scheduler.base import NodeConfig
 
 log = logging.getLogger("pool_manager.placement")
@@ -142,7 +143,8 @@ class PlacementPlanner:
             )
 
         if remaining > 0:
-            log.warning(
+            log.log(
+                TRACE,
                 "Could not place all %d tasks within %d max workers; %d tasks unplaced",
                 idle_count,
                 self._max_workers,
@@ -199,7 +201,8 @@ class PlacementPlanner:
                 continue
 
             if len(nodes) >= self._max_workers:
-                log.warning(
+                log.log(
+                    TRACE,
                     "Cannot place all tasks within %d max workers; "
                     "task requiring cpus=%.1f mem=%dMB gpus=%d unplaced",
                     self._max_workers,
@@ -218,7 +221,8 @@ class PlacementPlanner:
                     break
 
             if not placed:
-                log.warning(
+                log.log(
+                    TRACE,
                     "No node type can fit task requiring cpus=%.1f mem=%dMB gpus=%d",
                     task.cpus,
                     task.memory_mb,

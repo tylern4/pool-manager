@@ -1,3 +1,4 @@
+from pool_manager.log import TRACE
 from pool_manager.placement import NodeConfig, PlacementPlanner, TaskResources
 
 
@@ -386,14 +387,14 @@ class TestPlanEdgeCases:
         placements = p.plan(1)
         assert placements == []
 
-    def test_plan_remaining_tasks_warning(self, caplog):
+    def test_plan_remaining_tasks_trace(self, caplog):
         nc = [NodeConfig(name="small", cpus=1, memory_mb=1024)]
         p = PlacementPlanner(
             node_configs=nc,
             task_resources=TaskResources(cpus=1, memory_mb=1024),
             max_workers=1,
         )
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(TRACE, logger="pool_manager.placement"):
             p.plan(10)
         assert any("Could not place all" in rec.message for rec in caplog.records)
 
@@ -412,7 +413,7 @@ class TestPlanEdgeCases:
         nc = [NodeConfig(name="small", cpus=1, memory_mb=512)]
         p = PlacementPlanner(node_configs=nc)
         tasks = [TaskResources(cpus=8, memory_mb=16384)]
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(TRACE, logger="pool_manager.placement"):
             placements = p.plan_for_tasks(tasks)
         assert placements == []
 
@@ -420,7 +421,7 @@ class TestPlanEdgeCases:
         nc = [NodeConfig(name="cpu", cpus=16, memory_mb=65536, gpus=0)]
         p = PlacementPlanner(node_configs=nc)
         tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=1)]
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(TRACE, logger="pool_manager.placement"):
             placements = p.plan_for_tasks(tasks)
         assert placements == []
 
@@ -428,7 +429,7 @@ class TestPlanEdgeCases:
         nc = [NodeConfig(name="big", cpus=16, memory_mb=65536)]
         p = PlacementPlanner(node_configs=nc, max_workers=1)
         tasks = [TaskResources(cpus=1, memory_mb=1024)] * 20
-        with caplog.at_level("WARNING"):
+        with caplog.at_level(TRACE, logger="pool_manager.placement"):
             placements = p.plan_for_tasks(tasks)
         total = sum(pl.count for pl in placements)
         assert total <= 1
