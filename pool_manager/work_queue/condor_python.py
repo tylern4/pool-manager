@@ -3,12 +3,10 @@ try:
 except ImportError:
     htcondor = None
 
-import logging
+from loguru import logger
 
 from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend
-
-log = logging.getLogger("pool_manager.work_queue.condor_python")
 
 
 class CondorPythonBackend(CondorBackend):
@@ -21,8 +19,8 @@ class CondorPythonBackend(CondorBackend):
     def list_idle(self, constraint: str = "") -> list[TaskResources]:
         schedd = htcondor.Schedd(self._schedd_name) if self._schedd_name else htcondor.Schedd()
         projection = ["ClusterId", "RequestCpus", "RequestMemory", "RequestGpus"]
-        log.debug(
-            "Querying HTCondor schedd '%s' with constraint: %s",
+        logger.debug(
+            "Querying HTCondor schedd '{}' with constraint: {}",
             self._schedd_name or "(default)",
             constraint,
         )
@@ -30,15 +28,17 @@ class CondorPythonBackend(CondorBackend):
         if constraint:
             kw["constraint"] = constraint
         result = schedd.query(**kw)
-        tasks = [
-            TaskResources(
-                cpus=float(job.get("RequestCpus", 1) or 1),
-                memory_mb=int(job.get("RequestMemory", 1024) or 1024),
-                gpus=int(job.get("RequestGpus", 0) or 0),
+        tasks = []
+        for job in result:
+            job = {k.lower(): v for k, v in job.items()}
+            tasks.append(
+                TaskResources(
+                    cpus=float(job.get("requestcpus", 1)),
+                    memory_mb=int(job.get("requestmemory", 1024)),
+                    gpus=int(job.get("requestgpus", 0)),
+                )
             )
-            for job in result
-        ]
-        log.debug("HTCondor idle job count: %d", len(tasks))
+        logger.debug("HTCondor idle job count: {}", len(tasks))
         return tasks
 
     def name(self) -> str:

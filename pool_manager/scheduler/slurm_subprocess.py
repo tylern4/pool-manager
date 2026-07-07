@@ -1,19 +1,17 @@
-import logging
 import os
 import shlex
 import subprocess
 
-from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
+from loguru import logger
 
-log = logging.getLogger("pool_manager.scheduler.slurm_subprocess")
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    log.debug("Running: %s", shlex.join(cmd))
+    logger.debug("Running: {}", shlex.join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, **kwargs)
-    log.log(TRACE, "stdout: %s", result.stdout.strip())
-    log.log(TRACE, "stderr: %s", result.stderr.strip())
+    logger.trace("stdout: {}", result.stdout.strip())
+    logger.trace("stderr: {}", result.stderr.strip())
     return result
 
 
@@ -37,9 +35,9 @@ class SlurmSubprocessBackend(SchedulerBackend):
 
         if self._test_mode:
             job_id = _test_job_id()
-            log.info("[TEST] Would run: %s", shlex.join(cmd))
-            log.info(
-                "[TEST] Would submit job %s (script=%s, args=%s)",
+            logger.info("[TEST] Would run: {}", shlex.join(cmd))
+            logger.info(
+                "[TEST] Would submit job {} (script={}, args={})",
                 job_id,
                 script_path,
                 submit_args,
@@ -51,22 +49,24 @@ class SlurmSubprocessBackend(SchedulerBackend):
             raise RuntimeError(f"sbatch failed (exit {result.returncode}): {result.stderr.strip()}")
 
         job_id = result.stdout.strip().split(";")[0]
-        log.debug("Submitted Slurm job %s (script=%s, args=%s)", job_id, script_path, submit_args)
+        logger.debug(
+            "Submitted Slurm job {} (script={}, args={})", job_id, script_path, submit_args
+        )
         return job_id
 
     def cancel(self, job_id: str) -> None:
         cmd = ["scancel", job_id]
         if self._test_mode:
-            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            logger.info("[TEST] Would run: {}", shlex.join(cmd))
             return
 
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning(
-                "scancel %s failed (exit %d): %s", job_id, result.returncode, result.stderr.strip()
+            logger.warning(
+                "scancel {} failed (exit {}): {}", job_id, result.returncode, result.stderr.strip()
             )
         else:
-            log.debug("Cancelled Slurm job %s", job_id)
+            logger.debug("Cancelled Slurm job {}", job_id)
 
     def list_active(self) -> list[JobInfo]:
         cmd = [
@@ -79,7 +79,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
         ]
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning("sacct failed (exit %d): %s", result.returncode, result.stderr.strip())
+            logger.warning("sacct failed (exit {}): {}", result.returncode, result.stderr.strip())
             return []
 
         jobs: list[JobInfo] = []
@@ -98,7 +98,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
             state = _parse_slurm_state(state_str.strip())
             jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
 
-        log.debug("Active Slurm jobs: %s", [j.job_id for j in jobs])
+        logger.debug("Active Slurm jobs: {}", [j.job_id for j in jobs])
         return jobs
 
     @property
@@ -108,20 +108,20 @@ class SlurmSubprocessBackend(SchedulerBackend):
     def signal(self, job_id: str, sig: str) -> None:
         cmd = ["scancel", "--signal", sig, job_id]
         if self._test_mode:
-            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            logger.info("[TEST] Would run: {}", shlex.join(cmd))
             return
 
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning(
-                "scancel --signal %s %s failed (exit %d): %s",
+            logger.warning(
+                "scancel --signal {} {} failed (exit {}): {}",
                 sig,
                 job_id,
                 result.returncode,
                 result.stderr.strip(),
             )
         else:
-            log.debug("Sent signal %s to Slurm job %s", sig, job_id)
+            logger.debug("Sent signal {} to Slurm job {}", sig, job_id)
 
     def name(self) -> str:
         return "slurm_subprocess"

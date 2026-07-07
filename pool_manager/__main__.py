@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+from loguru import logger
+
 from pool_manager.config import Config
 from pool_manager.log import setup_logging
 from pool_manager.manager import PoolManager, _make_scheduler, _make_work_queue
@@ -70,10 +72,10 @@ def _run_daemon(args):
     config = Config.from_file(Path(config_path))
 
     level = getattr(args, "log_level", None) or config.log_level
-    logger = setup_logging(level, log_mode=config.log_mode, log_file=config.log_file)
-    logger.info("Loading config from %s", config_path)
+    setup_logging(level, log_mode=config.log_mode, log_file=config.log_file)
+    logger.info("Loading config from {}", config_path)
     logger.debug(
-        "Config: poll_interval=%s min=%d max=%d batch=%d backend=%s scheduler=%s",
+        "Config: poll_interval={} min={} max={} batch={} backend={} scheduler={}",
         config.poll_interval,
         config.scaling.min_workers,
         config.scaling.max_workers,
@@ -86,7 +88,7 @@ def _run_daemon(args):
         wq = _make_work_queue(config)
         sched = _make_scheduler(config)
     except ValueError as e:
-        logger.error("Configuration error: %s", e)
+        logger.error("Configuration error: {}", e)
         sys.exit(1)
 
     pm = PoolManager(config=config, work_queue=wq, scheduler=sched)
@@ -117,11 +119,12 @@ def _run_test_strategy(args):
 
     tasks = []
     for job in raw:
+        job = {k.lower(): v for k, v in job.items()}
         tasks.append(
             TaskResources(
-                cpus=float(job.get("RequestCpus", 1) or 1),
-                memory_mb=int(job.get("RequestMemory", 1024) or 1024),
-                gpus=int(job.get("RequestGpus", 0) or 0),
+                cpus=float(job.get("requestcpus", 1)),
+                memory_mb=int(job.get("requestmemory", 1024)),
+                gpus=int(job.get("requestgpus", 0)),
             )
         )
 

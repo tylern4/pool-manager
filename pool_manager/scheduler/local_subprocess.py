@@ -1,4 +1,3 @@
-import logging
 import os
 import shlex
 import signal
@@ -6,9 +5,9 @@ import subprocess
 import threading
 from dataclasses import dataclass
 
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
+from loguru import logger
 
-log = logging.getLogger("pool_manager.scheduler.local_subprocess")
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 _next_id = 0
 _id_lock = threading.Lock()
@@ -35,8 +34,8 @@ class LocalSubprocessBackend(SchedulerBackend):
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         if self._test_mode:
             job_id = _test_job_id()
-            log.info(
-                "[TEST] Would start local worker %s (script=%s, args=%s)",
+            logger.info(
+                "[TEST] Would start local worker {} (script={}, args={})",
                 job_id,
                 script_path,
                 submit_args,
@@ -50,22 +49,22 @@ class LocalSubprocessBackend(SchedulerBackend):
         for key, val in submit_args.items():
             env[f"POOL_MANAGER_{key.upper()}"] = str(val)
 
-        log.debug("Starting local worker %s: %s", job_id, shlex.join(cmd))
+        logger.debug("Starting local worker {}: {}", job_id, shlex.join(cmd))
         proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self._procs[job_id] = _ManagedProc(proc=proc, job_id=job_id)
-        log.debug("Started local worker %s (pid=%d)", job_id, proc.pid)
+        logger.debug("Started local worker {} (pid={})", job_id, proc.pid)
         return job_id
 
     def cancel(self, job_id: str) -> None:
         if self._test_mode:
-            log.info("[TEST] Would cancel local worker %s", job_id)
+            logger.info("[TEST] Would cancel local worker {}", job_id)
             return
 
         mp = self._procs.pop(job_id, None)
         if mp is None:
-            log.warning("Local worker %s not found", job_id)
+            logger.warning("Local worker {} not found", job_id)
             return
-        log.debug("Killing local worker %s (pid=%d)", job_id, mp.proc.pid)
+        logger.debug("Killing local worker {} (pid={})", job_id, mp.proc.pid)
         mp.proc.terminate()
         try:
             mp.proc.wait(timeout=10)
@@ -88,15 +87,15 @@ class LocalSubprocessBackend(SchedulerBackend):
 
     def signal(self, job_id: str, sig: str) -> None:
         if self._test_mode:
-            log.info("[TEST] Would send signal %s to local worker %s", sig, job_id)
+            logger.info("[TEST] Would send signal {} to local worker {}", sig, job_id)
             return
 
         mp = self._procs.get(job_id)
         if mp is None:
-            log.warning("Local worker %s not found for signal", job_id)
+            logger.warning("Local worker {} not found for signal", job_id)
             return
         sig_num = getattr(signal.Signals, sig.upper(), signal.SIGTERM)
-        log.debug("Sending %s to local worker %s (pid=%d)", sig, job_id, mp.proc.pid)
+        logger.debug("Sending {} to local worker {} (pid={})", sig, job_id, mp.proc.pid)
         mp.proc.send_signal(sig_num)
 
     def name(self) -> str:

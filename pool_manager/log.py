@@ -1,46 +1,10 @@
 from __future__ import annotations
 
-import logging
 import sys
-from pathlib import Path
 
-import colorlog
-
-TRACE = logging.DEBUG - 5
+from loguru import logger
 
 LOG_MODES = {"stdout", "file", "both"}
-
-
-class PoolManagerLogger(logging.Logger):
-    def trace(self, msg, *args, **kwargs):
-        if self.isEnabledFor(TRACE):
-            self._log(TRACE, msg, args, **kwargs)
-
-
-logging.setLoggerClass(PoolManagerLogger)
-logging.addLevelName(TRACE, "TRACE")
-
-
-def _colored_formatter():
-    return colorlog.ColoredFormatter(
-        "%(asctime)s %(log_color)s[%(levelname)s]%(reset)s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        log_colors={
-            "TRACE": "cyan",
-            "DEBUG": "blue",
-            "INFO": "green",
-            "WARNING": "yellow",
-            "ERROR": "red",
-            "CRITICAL": "bold_red",
-        },
-    )
-
-
-def _plain_formatter():
-    return logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
 
 
 def setup_logging(level: str = "INFO", log_mode: str = "stdout", log_file: str = ""):
@@ -48,22 +12,24 @@ def setup_logging(level: str = "INFO", log_mode: str = "stdout", log_file: str =
         raise ValueError(f"Invalid log_mode: {log_mode!r} (choose {', '.join(sorted(LOG_MODES))})")
 
     level = level.upper()
-    logger = logging.getLogger("pool_manager")
-    logger.setLevel(level)
+    logger.remove()
 
-    logger.handlers.clear()
+    colored_fmt = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> "
+        "<level>{level: <8}</level> "
+        "<cyan>{name}</cyan>: <level>{message}</level>"
+    )
+    plain_fmt = "{time:YYYY-MM-DD HH:mm:ss} [{level: <8}] {name}: {message}"
 
     if log_mode in ("stdout", "both"):
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(level)
-        handler.setFormatter(_colored_formatter())
-        logger.addHandler(handler)
+        logger.add(sys.stdout, format=colored_fmt, level=level, colorize=True)
 
     if log_mode in ("file", "both"):
-        path = Path(log_file) if log_file else Path("pool-manager.log")
-        handler = logging.FileHandler(path)
-        handler.setLevel(level)
-        handler.setFormatter(_plain_formatter())
-        logger.addHandler(handler)
+        logger.add(
+            log_file or "pool-manager.log",
+            format=plain_fmt,
+            level=level,
+            colorize=False,
+        )
 
     return logger

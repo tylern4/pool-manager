@@ -3,13 +3,10 @@ try:
 except ImportError:
     httpx = None
 
-import logging
+from loguru import logger
 
-from pool_manager.log import TRACE
 from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend
-
-log = logging.getLogger("pool_manager.work_queue.condor_rest")
 
 
 class CondorRESTAPIBackend(CondorBackend):
@@ -32,22 +29,24 @@ class CondorRESTAPIBackend(CondorBackend):
             params["constraint"] = constraint
         url = f"{self._url}/v1/jobs"
 
-        log.debug("GET %s with params: %s", url, params)
+        logger.debug("GET {} with params: {}", url, params)
         resp = httpx.get(url, headers=headers, params=params, timeout=30)
-        log.log(TRACE, "REST response status=%d body=%s", resp.status_code, resp.text[:2000])
+        logger.trace("REST response status={} body={}", resp.status_code, resp.text[:2000])
 
         resp.raise_for_status()
         data = resp.json()
         jobs = data.get("data", data.get("jobs", []))
-        tasks = [
-            TaskResources(
-                cpus=float(job.get("RequestCpus", 1) or 1),
-                memory_mb=int(job.get("RequestMemory", 1024) or 1024),
-                gpus=int(job.get("RequestGpus", 0) or 0),
+        tasks = []
+        for job in jobs:
+            job = {k.lower(): v for k, v in job.items()}
+            tasks.append(
+                TaskResources(
+                    cpus=float(job.get("requestcpus", 1)),
+                    memory_mb=int(job.get("requestmemory", 1024)),
+                    gpus=int(job.get("requestgpus", 0)),
+                )
             )
-            for job in jobs
-        ]
-        log.debug("HTCondor REST idle count: %d", len(tasks))
+        logger.debug("HTCondor REST idle count: {}", len(tasks))
         return tasks
 
     def name(self) -> str:

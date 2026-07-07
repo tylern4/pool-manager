@@ -3,12 +3,9 @@ try:
 except ImportError:
     httpx = None
 
-import logging
+from loguru import logger
 
-from pool_manager.log import TRACE
 from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
-
-log = logging.getLogger("pool_manager.scheduler.htcondor_rest")
 
 
 class CondorRestClient:
@@ -33,31 +30,31 @@ class CondorRestClient:
         payload.setdefault("executable", script_path)
 
         url = f"{self._url}/condor_submit"
-        log.debug("POST %s", url)
+        logger.debug("POST {}", url)
         resp = httpx.post(url, json=payload, headers=self._headers(), timeout=30)
-        log.log(TRACE, "submit response: status=%d body=%s", resp.status_code, resp.text[:2000])
+        logger.trace("submit response: status={} body={}", resp.status_code, resp.text[:2000])
         resp.raise_for_status()
         data = resp.json()
         job_id = str(data.get("cluster", ""))
-        log.debug("Submitted HTCondor job %s via REST API", job_id)
+        logger.debug("Submitted HTCondor job {} via REST API", job_id)
         return job_id
 
     def remove(self, job_id: str) -> None:
         url = f"{self._url}/condor_rm/{job_id}"
-        log.debug("DELETE %s", url)
+        logger.debug("DELETE {}", url)
         resp = httpx.delete(url, headers=self._headers(), timeout=30)
-        log.log(TRACE, "remove response: status=%d", resp.status_code)
+        logger.trace("remove response: status={}", resp.status_code)
         if resp.status_code not in (200, 204):
-            log.warning("Failed to remove job %s via REST: HTTP %d", job_id, resp.status_code)
+            logger.warning("Failed to remove job {} via REST: HTTP {}", job_id, resp.status_code)
 
     def list_jobs(self, constraint: str = "") -> list[dict]:
         url = f"{self._url}/condor_q"
         params: dict[str, str] = {}
         if constraint:
             params["constraint"] = constraint
-        log.debug("GET %s params=%s", url, params)
+        logger.debug("GET {} params={}", url, params)
         resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
-        log.log(TRACE, "list_jobs response: status=%d", resp.status_code)
+        logger.trace("list_jobs response: status={}", resp.status_code)
         resp.raise_for_status()
         return resp.json()
 
@@ -109,11 +106,11 @@ class HTCondorRESTAPIBackend(SchedulerBackend):
                 if state in (JobState.PENDING, JobState.RUNNING):
                     jobs.append(JobInfo(job_id=str(cluster_id), state=state, job_name=job_name))
             except Exception:
-                log.exception("Failed to parse job from REST response: %s", raw)
+                logger.exception("Failed to parse job from REST response: {}", raw)
         return jobs
 
     def signal(self, job_id: str, sig: str) -> None:
-        log.debug("Signalling job %s via removal (HTCondor REST has no signal endpoint)", job_id)
+        logger.debug("Signalling job {} via removal (HTCondor REST has no signal endpoint)", job_id)
         self._client.remove(job_id)
 
     def name(self) -> str:

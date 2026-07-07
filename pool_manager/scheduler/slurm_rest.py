@@ -3,14 +3,12 @@ try:
 except ImportError:
     httpx = None
 
-import logging
 import os
 from pathlib import Path
 
-from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
+from loguru import logger
 
-log = logging.getLogger("pool_manager.scheduler.slurm_rest")
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 slurm_api_ver = os.getenv("SLURM_API_VER", "v0.0.38")
 
@@ -39,8 +37,8 @@ class SlurmRESTAPIBackend(SchedulerBackend):
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         if self._test_mode:
             job_id = _test_job_id()
-            log.info(
-                "[TEST] Would submit job %s via REST (script=%s, args=%s)",
+            logger.info(
+                "[TEST] Would submit job {} via REST (script={}, args={})",
                 job_id,
                 script_path,
                 submit_args,
@@ -57,35 +55,35 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             payload["job"] = submit_args
 
         url = f"{self._url}/slurm/{slurm_api_ver}/job/submit"
-        log.debug("POST %s", url)
+        logger.debug("POST {}", url)
         resp = httpx.post(url, json=payload, headers=self._headers(), timeout=30)
-        log.log(TRACE, "submit response: status=%d body=%s", resp.status_code, resp.text[:2000])
+        logger.trace("submit response: status={} body={}", resp.status_code, resp.text[:2000])
         resp.raise_for_status()
         data = resp.json()
         job_id = str(data.get("job_id", data.get("job_id", "")))
-        log.debug("Submitted Slurm job %s via REST API", job_id)
+        logger.debug("Submitted Slurm job {} via REST API", job_id)
         return job_id
 
     def cancel(self, job_id: str) -> None:
         if self._test_mode:
-            log.info("[TEST] Would cancel job %s via REST", job_id)
+            logger.info("[TEST] Would cancel job {} via REST", job_id)
             return
 
         url = f"{self._url}/slurm/{slurm_api_ver}/job/{job_id}"
-        log.debug("DELETE %s", url)
+        logger.debug("DELETE {}", url)
         resp = httpx.delete(url, headers=self._headers(), timeout=30)
-        log.log(TRACE, "cancel response: status=%d", resp.status_code)
+        logger.trace("cancel response: status={}", resp.status_code)
         if resp.status_code not in (200, 204):
-            log.warning("Failed to cancel job %s via REST: HTTP %d", job_id, resp.status_code)
+            logger.warning("Failed to cancel job {} via REST: HTTP {}", job_id, resp.status_code)
 
     def list_active(self) -> list[JobInfo]:
         url = f"{self._url}/slurm/{slurm_api_ver}/jobs"
         params: dict[str, str] = {}
         if self._user:
             params["user"] = self._user
-        log.debug("GET %s params=%s", url, params)
+        logger.debug("GET {} params={}", url, params)
         resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
-        log.log(TRACE, "list_active response: status=%d", resp.status_code)
+        logger.trace("list_active response: status={}", resp.status_code)
         resp.raise_for_status()
         data = resp.json()
 
@@ -99,12 +97,12 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             state = _parse_slurm_rest_state(state_str)
             jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
 
-        log.debug("Active Slurm jobs from REST: %s", [j.job_id for j in jobs])
+        logger.debug("Active Slurm jobs from REST: {}", [j.job_id for j in jobs])
         return jobs
 
     def signal(self, job_id: str, sig: str) -> None:
         if self._test_mode:
-            log.info("[TEST] Would send signal %s to job %s", sig, job_id)
+            logger.info("[TEST] Would send signal {} to job {}", sig, job_id)
             return
         self.cancel(job_id)
 

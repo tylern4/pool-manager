@@ -1,4 +1,5 @@
-from pool_manager.log import TRACE
+from loguru import logger
+
 from pool_manager.placement import NodeConfig, PlacementPlanner, TaskResources
 
 
@@ -387,16 +388,20 @@ class TestPlanEdgeCases:
         placements = p.plan(1)
         assert placements == []
 
-    def test_plan_remaining_tasks_trace(self, caplog):
+    def test_plan_remaining_tasks_trace(self):
         nc = [NodeConfig(name="small", cpus=1, memory_mb=1024)]
         p = PlacementPlanner(
             node_configs=nc,
             task_resources=TaskResources(cpus=1, memory_mb=1024),
             max_workers=1,
         )
-        with caplog.at_level(TRACE, logger="pool_manager.placement"):
+        records = []
+        handler_id = logger.add(lambda m: records.append(m), level="TRACE")
+        try:
             p.plan(10)
-        assert any("Could not place all" in rec.message for rec in caplog.records)
+        finally:
+            logger.remove(handler_id)
+        assert any("Could not place all" in m for m in records)
 
     def test_plan_for_tasks_skips_gpu_node_for_cpu_task(self):
         nc = [
@@ -409,28 +414,28 @@ class TestPlanEdgeCases:
         assert len(placements) == 1
         assert placements[0].node_config.name == "cpu"
 
-    def test_plan_for_tasks_cannot_place_any(self, caplog):
+    def test_plan_for_tasks_cannot_place_any(self):
         nc = [NodeConfig(name="small", cpus=1, memory_mb=512)]
         p = PlacementPlanner(node_configs=nc)
         tasks = [TaskResources(cpus=8, memory_mb=16384)]
-        with caplog.at_level(TRACE, logger="pool_manager.placement"):
-            placements = p.plan_for_tasks(tasks)
+        logger.remove()
+        placements = p.plan_for_tasks(tasks)
         assert placements == []
 
-    def test_plan_for_tasks_unplaceable_due_to_gpu(self, caplog):
+    def test_plan_for_tasks_unplaceable_due_to_gpu(self):
         nc = [NodeConfig(name="cpu", cpus=16, memory_mb=65536, gpus=0)]
         p = PlacementPlanner(node_configs=nc)
         tasks = [TaskResources(cpus=1, memory_mb=1024, gpus=1)]
-        with caplog.at_level(TRACE, logger="pool_manager.placement"):
-            placements = p.plan_for_tasks(tasks)
+        logger.remove()
+        placements = p.plan_for_tasks(tasks)
         assert placements == []
 
-    def test_plan_for_tasks_max_workers_exceeded(self, caplog):
+    def test_plan_for_tasks_max_workers_exceeded(self):
         nc = [NodeConfig(name="big", cpus=16, memory_mb=65536)]
         p = PlacementPlanner(node_configs=nc, max_workers=1)
         tasks = [TaskResources(cpus=1, memory_mb=1024)] * 20
-        with caplog.at_level(TRACE, logger="pool_manager.placement"):
-            placements = p.plan_for_tasks(tasks)
+        logger.remove()
+        placements = p.plan_for_tasks(tasks)
         total = sum(pl.count for pl in placements)
         assert total <= 1
 

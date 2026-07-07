@@ -1,3 +1,5 @@
+from loguru import logger
+
 from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend, WorkQueue
 from pool_manager.work_queue.condor import CondorWorkQueue
@@ -69,12 +71,14 @@ class TestCondorWorkQueue:
 
 
 class TestCondorWorkQueueTraceLogging:
-    def test_list_idle_trace_logging(self, caplog):
-        from pool_manager.log import TRACE
-
+    def test_list_idle_trace_logging(self):
         backend = _FakeCondorBackend(count=2)
         wq = CondorWorkQueue(backend=backend)
-        with caplog.at_level(TRACE, logger="pool_manager.work_queue.condor"):
+        records = []
+        handler_id = logger.add(lambda m: records.append(m), level="TRACE")
+        try:
             tasks = wq.list_idle()
+        finally:
+            logger.remove(handler_id)
         assert len(tasks) == 2
-        assert any("Task: cpus=" in rec.message for rec in caplog.records)
+        assert any("Task: cpus=" in m for m in records)

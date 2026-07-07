@@ -1,9 +1,8 @@
-import logging
 from pathlib import Path
 
-from pool_manager.scheduler.base import JobInfo, SchedulerBackend
+from loguru import logger
 
-log = logging.getLogger("pool_manager.scheduler.wrapper")
+from pool_manager.scheduler.base import JobInfo, SchedulerBackend
 
 
 class SchedulerWrapper(SchedulerBackend):
@@ -11,7 +10,7 @@ class SchedulerWrapper(SchedulerBackend):
         self._backend = backend
 
     def submit(self, script_path: Path, submit_args: dict[str, str]) -> str:
-        log.debug("Submitting via %s", self._backend.name())
+        logger.debug("Submitting via {}", self._backend.name())
         return self._backend.submit(script_path, submit_args)
 
     def cancel(self, job_id: str) -> None:

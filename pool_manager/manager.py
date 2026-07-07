@@ -1,4 +1,3 @@
-import logging
 import os
 import signal
 import time
@@ -8,6 +7,8 @@ try:
     import htcondor
 except ImportError:
     htcondor = None
+
+from loguru import logger
 
 from pool_manager.config import Config
 from pool_manager.placement import Placement, PlacementPlanner, TaskResources
@@ -29,15 +30,13 @@ from pool_manager.work_queue import (
 )
 from pool_manager.work_queue.base import WorkQueue
 
-log = logging.getLogger("pool_manager.manager")
-
 
 def _make_work_queue(cfg) -> WorkQueue:
     wk = cfg.work_queue
     match wk.backend:
         case "condor_python":
             if htcondor is None:
-                log.warning("htcondor package not available, falling back to condor_subprocess")
+                logger.warning("htcondor package not available, falling back to condor_subprocess")
                 backend = CondorSubprocessBackend(schedd_name=wk.schedd_name)
             else:
                 backend = CondorPythonBackend(schedd_name=wk.schedd_name)
@@ -132,11 +131,11 @@ class PoolManager:
         raise KeyboardInterrupt()
 
     def run(self):
-        log.info(
-            "Pool manager started (queue=%s, scheduler=%s)", self._wq.name(), self._sched.name()
+        logger.info(
+            "Pool manager started (queue={}, scheduler={})", self._wq.name(), self._sched.name()
         )
-        log.info(
-            "Scaling policy: min=%d max=%d batch=%d cooldown_up=%.0fs cooldown_down=%.0fs",
+        logger.info(
+            "Scaling policy: min={} max={} batch={} cooldown_up={} cooldown_down={}",
             self._policy.min_workers,
             self._policy.max_workers,
             self._policy.batch_size,
@@ -144,8 +143,8 @@ class PoolManager:
             self._policy.scale_down_cooldown,
         )
         if self._has_node_configs:
-            log.info(
-                "Node-aware placement: %d node config(s), resources from condor_q per task",
+            logger.info(
+                "Node-aware placement: {} node config(s), resources from condor_q per task",
                 len(self._config.scheduler.node_configs),
             )
 
@@ -156,26 +155,26 @@ class PoolManager:
                 try:
                     self._tick()
                 except Exception:
-                    log.exception("Unhandled error in main loop")
+                    logger.exception("Unhandled error in main loop")
 
                 if not self._running:
                     break
 
                 time.sleep(self._config.poll_interval)
         except KeyboardInterrupt:
-            log.info("Shutting down")
+            logger.info("Shutting down")
 
         if self._daemon_shutdown and self._policy.drain_on_stop:
             self._drain_all()
-        log.info("Pool manager stopped")
+        logger.info("Pool manager stopped")
 
     def _tick(self):
         tasks = self._wq.list_idle()
         plan = self._planner.plan_for_tasks(tasks)
         target = sum(p.count for p in plan)
         target = max(self._policy.min_workers, min(self._policy.max_workers, target))
-        log.debug(
-            "Tick: idle=%d target=%d active=%d draining=%d",
+        logger.debug(
+            "Tick: idle={} target={} active={} draining={}",
             len(tasks),
             target,
             self._active_count(),
@@ -193,7 +192,7 @@ class PoolManager:
             config_name = parse_config_name(aj.job_name, prefix)
             self._node_assignments.setdefault(aj.job_id, config_name)
         if active:
-            log.info("Recovered %d active worker(s) from scheduler", len(active))
+            logger.info("Recovered {} active worker(s) from scheduler", len(active))
 
     def _reconcile(self):
         active = self._sched.list_active()
@@ -203,13 +202,13 @@ class PoolManager:
         for aj in active:
             existing = self._tracked.get(aj.job_id)
             if existing is None:
-                log.debug("Tracking new job %s (state=%s)", aj.job_id, aj.state.value)
+                logger.debug("Tracking new job {} (state={})", aj.job_id, aj.state.value)
                 self._tracked[aj.job_id] = aj
                 config_name = parse_config_name(aj.job_name, prefix)
                 self._node_assignments.setdefault(aj.job_id, config_name)
             elif existing.state != aj.state:
-                log.debug(
-                    "Job %s state change: %s -> %s", aj.job_id, existing.state.value, aj.state.value
+                logger.debug(
+                    "Job {} state change: {} -> {}", aj.job_id, existing.state.value, aj.state.value
                 )
                 self._tracked[aj.job_id] = aj
 
@@ -221,9 +220,9 @@ class PoolManager:
         for jid in lost:
             tracked = self._tracked[jid]
             if tracked.state == JobState.DRAINING:
-                log.info("Drained job %s exited gracefully", jid)
+                logger.info("Drained job {} exited gracefully", jid)
             else:
-                log.info("Job %s no longer active (was %s)", jid, tracked.state.value)
+                logger.info("Job {} no longer active (was {})", jid, tracked.state.value)
             self._tracked[jid] = JobInfo(job_id=jid, state=JobState.EXITED)
             self._node_assignments.pop(jid, None)
 
@@ -233,10 +232,12 @@ class PoolManager:
 
         if target > active:
             if now - self._last_scale_up < self._policy.scale_up_cooldown:
-                log.debug("Scale-up cooldown active, skipping")
+                logger.debug("Scale-up cooldown active, skipping")
                 return
             to_add = target - active
-            log.debug("Scaling UP: adding %d workers (target=%d active=%d)", to_add, target, active)
+            logger.debug(
+                "Scaling UP: adding {} workers (target={} active={})", to_add, target, active
+            )
             self._start_workers(plan, to_add)
             self._last_scale_up = now
             self._drain_start = None
@@ -244,8 +245,8 @@ class PoolManager:
         elif target < active:
             if not self._daemon_shutdown:
                 if self._drain_start is None:
-                    log.debug(
-                        "Idle count %d below target %d; starting scale-down cooldown",
+                    logger.debug(
+                        "Idle count {} below target {}; starting scale-down cooldown",
                         len(tasks),
                         target,
                     )
@@ -255,8 +256,8 @@ class PoolManager:
                     return
 
             excess = active - target
-            log.debug(
-                "Scaling DOWN: removing %d workers (target=%d active=%d)", excess, target, active
+            logger.debug(
+                "Scaling DOWN: removing {} workers (target={} active={})", excess, target, active
             )
             self._signal_workers(excess, plan=plan)
             self._last_scale_down = now
@@ -336,23 +337,23 @@ class PoolManager:
             to_drain = active[:count]
 
         for jid in to_drain:
-            log.info("Signalling worker %s to drain (SIGTERM)", jid)
+            logger.info("Signalling worker {} to drain (SIGTERM)", jid)
             try:
                 self._sched.signal(jid, "SIGTERM")
                 self._tracked[jid] = JobInfo(job_id=jid, state=JobState.DRAINING)
             except Exception:
-                log.exception("Failed to signal worker %s", jid)
+                logger.exception("Failed to signal worker {}", jid)
 
     def _start_workers_simple(self, count: int):
         script = self._config.scheduler.worker_script
         if not script:
-            log.error("Cannot start workers: no worker_script configured")
+            logger.error("Cannot start workers: no worker_script configured")
             return
         script_path = Path(script)
         if not script_path.exists():
-            log.error("Worker script not found: %s", script)
+            logger.error("Worker script not found: {}", script)
             return
-        log.debug("Starting %d worker(s) via %s", count, script)
+        logger.debug("Starting {} worker(s) via {}", count, script)
         prefix = self._config.scheduler.job_name_prefix
         for i in range(count):
             try:
@@ -361,20 +362,20 @@ class PoolManager:
                 job_id = self._sched.submit(script, args)
                 self._tracked[job_id] = JobInfo(job_id=job_id, state=JobState.PENDING)
                 self._node_assignments[job_id] = "default"
-                log.info("Started worker %s (%s)", job_id, self._sched.name())
+                logger.info("Started worker {} ({})", job_id, self._sched.name())
             except Exception:
-                log.exception("Failed to start worker %d/%d", i + 1, count)
+                logger.exception("Failed to start worker {}/{}", i + 1, count)
 
     def _start_workers_from_plan(self, placements: list[Placement], count: int):
         script = self._config.scheduler.worker_script
         if not script:
-            log.error("Cannot start workers: no worker_script configured")
+            logger.error("Cannot start workers: no worker_script configured")
             return
         script_path = Path(script)
         if not script_path.exists():
-            log.error("Worker script not found: %s", script)
+            logger.error("Worker script not found: {}", script)
             return
-        log.debug("Starting %d worker(s) from placement plan", count)
+        logger.debug("Starting {} worker(s) from placement plan", count)
         prefix = self._config.scheduler.job_name_prefix
         remaining = count
         for p in placements:
@@ -395,9 +396,9 @@ class PoolManager:
                     job_id = self._sched.submit(script, args)
                     self._tracked[job_id] = JobInfo(job_id=job_id, state=JobState.PENDING)
                     self._node_assignments[job_id] = nc.name
-                    log.info("Started worker %s (%s) on %s", job_id, self._sched.name(), nc.name)
+                    logger.info("Started worker {} ({}) on {}", job_id, self._sched.name(), nc.name)
                 except Exception:
-                    log.exception("Failed to start worker on %s", nc.name)
+                    logger.exception("Failed to start worker on {}", nc.name)
             remaining -= batch
             if remaining <= 0:
                 break
@@ -405,18 +406,18 @@ class PoolManager:
     def _force_cancel_draining(self):
         draining = [j for j in self._tracked.values() if j.state == JobState.DRAINING]
         for ji in draining:
-            log.warning("Force-cancelling draining worker %s (timed out)", ji.job_id)
+            logger.warning("Force-cancelling draining worker {} (timed out)", ji.job_id)
             try:
                 self._sched.cancel(ji.job_id)
                 self._tracked[ji.job_id] = JobInfo(job_id=ji.job_id, state=JobState.EXITED)
             except Exception:
-                log.exception("Failed to force-cancel worker %s", ji.job_id)
+                logger.exception("Failed to force-cancel worker {}", ji.job_id)
 
     def _drain_all(self):
-        log.info("Draining all workers")
+        logger.info("Draining all workers")
         active = self._active_count()
         if active == 0:
-            log.info("No active workers to drain")
+            logger.info("No active workers to drain")
             return
         plan = self._planner.plan_for_tasks([])
         self._signal_workers(active, plan=plan)
@@ -424,7 +425,7 @@ class PoolManager:
         while time.monotonic() < deadline:
             self._reconcile()
             if self._active_count() == 0:
-                log.info("All workers drained")
+                logger.info("All workers drained")
                 return
             time.sleep(2)
         self._force_cancel_draining()

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
-from pool_manager.log import TRACE
-from pool_manager.scheduler.base import NodeConfig
+from loguru import logger
 
-log = logging.getLogger("pool_manager.placement")
+from pool_manager.scheduler.base import NodeConfig
 
 
 @dataclass
@@ -98,9 +96,9 @@ class PlacementPlanner:
 
             fit_per_node = max(fit_per_node, 0)
             if fit_per_node == 0:
-                log.debug(
-                    "Node %s cannot fit any task "
-                    "(cpus=%d mem=%dMB gpus=%d vs task cpus=%.1f mem=%dMB gpus=%d)",
+                logger.debug(
+                    "Node {} cannot fit any task "
+                    "(cpus={} mem={}MB gpus={} vs task cpus={} mem={}MB gpus={})",
                     nc.name,
                     nc.cpus,
                     nc.memory_mb,
@@ -133,8 +131,8 @@ class PlacementPlanner:
             remaining -= tasks_covered
             total_nodes += nodes_needed
 
-            log.debug(
-                "Placed %d tasks on %d x %s (%d tasks/node, %d remaining)",
+            logger.debug(
+                "Placed {} tasks on {} x {} ({} tasks/node, {} remaining)",
                 tasks_covered,
                 nodes_needed,
                 nc.name,
@@ -143,9 +141,8 @@ class PlacementPlanner:
             )
 
         if remaining > 0:
-            log.log(
-                TRACE,
-                "Could not place all %d tasks within %d max workers; %d tasks unplaced",
+            logger.trace(
+                "Could not place all {} tasks within {} max workers; {} tasks unplaced",
                 idle_count,
                 self._max_workers,
                 remaining,
@@ -201,10 +198,9 @@ class PlacementPlanner:
                 continue
 
             if len(nodes) >= self._max_workers:
-                log.log(
-                    TRACE,
-                    "Cannot place all tasks within %d max workers; "
-                    "task requiring cpus=%.1f mem=%dMB gpus=%d unplaced",
+                logger.trace(
+                    "Cannot place all tasks within {} max workers; "
+                    "task requiring cpus={} mem={}MB gpus={} unplaced",
                     self._max_workers,
                     task.cpus,
                     task.memory_mb,
@@ -221,9 +217,8 @@ class PlacementPlanner:
                     break
 
             if not placed:
-                log.log(
-                    TRACE,
-                    "No node type can fit task requiring cpus=%.1f mem=%dMB gpus=%d",
+                logger.warning(
+                    "No node type can fit task requiring cpus={} mem={}MB gpus={}",
                     task.cpus,
                     task.memory_mb,
                     task.gpus,

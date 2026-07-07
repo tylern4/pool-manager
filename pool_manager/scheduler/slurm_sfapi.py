@@ -1,16 +1,13 @@
 import json
-import logging
 from pathlib import Path
 
+from loguru import logger
 from sfapi_client import Client
 from sfapi_client._jobs import JobCommand
 from sfapi_client.compute import Machine
 from sfapi_client.jobs import JobState as SFApiJobState
 
-from pool_manager.log import TRACE
 from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
-
-log = logging.getLogger("pool_manager.scheduler.slurm_sfapi")
 
 
 class SlurmSFAPIBackend(SchedulerBackend):
@@ -46,8 +43,8 @@ class SlurmSFAPIBackend(SchedulerBackend):
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         if self._test_mode:
             job_id = _test_job_id()
-            log.info(
-                "[TEST] Would submit job %s via SFAPI on %s (script=%s, args=%s)",
+            logger.info(
+                "[TEST] Would submit job {} via SFAPI on {} (script={}, args={})",
                 job_id,
                 self._machine,
                 script_path,
@@ -76,25 +73,25 @@ class SlurmSFAPIBackend(SchedulerBackend):
         else:
             wrapped = script_content
 
-        log.debug("Submitting script via SFAPI on %s", self._machine)
-        log.log(TRACE, "Wrapped script:\n%s", wrapped)
+        logger.debug("Submitting script via SFAPI on {}", self._machine)
+        logger.trace("Wrapped script:\n{}", wrapped)
 
         job = compute.submit_job(wrapped)
         job_id = str(job.jobid)
-        log.info("Submitted job %s on %s via SFAPI", job_id, self._machine)
+        logger.info("Submitted job {} on {} via SFAPI", job_id, self._machine)
         return job_id
 
     def cancel(self, job_id: str) -> None:
         if self._test_mode:
-            log.info("[TEST] Would cancel job %s via SFAPI on %s", job_id, self._machine)
+            logger.info("[TEST] Would cancel job {} via SFAPI on {}", job_id, self._machine)
             return
 
         client = Client(**self._client_kwargs)
         compute = client.compute(Machine(self._machine))
         job = compute.job(jobid=job_id)
-        log.debug("Cancelling job %s via SFAPI", job_id)
+        logger.debug("Cancelling job {} via SFAPI", job_id)
         job.cancel()
-        log.debug("Cancelled job %s", job_id)
+        logger.debug("Cancelled job {}", job_id)
 
     def list_active(self) -> list[JobInfo]:
         client = Client(**self._client_kwargs)
@@ -104,7 +101,7 @@ class SlurmSFAPIBackend(SchedulerBackend):
         if self._user:
             kwargs["user"] = self._user
 
-        log.debug("Listing jobs on %s via SFAPI (sacct)", self._machine)
+        logger.debug("Listing jobs on {} via SFAPI (sacct)", self._machine)
         jobs = compute.jobs(command=JobCommand.sacct, **kwargs)
 
         result: list[JobInfo] = []
@@ -115,23 +112,23 @@ class SlurmSFAPIBackend(SchedulerBackend):
             if state in (JobState.RUNNING, JobState.PENDING):
                 result.append(JobInfo(job_id=str(j.jobid), state=state, job_name=j.jobname or ""))
 
-        log.debug("Active jobs on %s: %s", self._machine, [j.job_id for j in result])
+        logger.debug("Active jobs on {}: {}", self._machine, [j.job_id for j in result])
         return result
 
     def signal(self, job_id: str, sig: str) -> None:
         if self._test_mode:
-            log.info("[TEST] Would send signal %s to job %s via SFAPI", sig, job_id)
+            logger.info("[TEST] Would send signal {} to job {} via SFAPI", sig, job_id)
             return
 
         client = Client(**self._client_kwargs)
         compute = client.compute(Machine(self._machine))
-        log.debug("Sending signal %s to job %s via SFAPI", sig, job_id)
+        logger.debug("Sending signal {} to job {} via SFAPI", sig, job_id)
         resp = compute.client.post(
             f"compute/jobs/{self._machine}/{job_id}/signal",
             data={"signal": sig},
         )
         resp.raise_for_status()
-        log.debug("Sent signal %s to job %s", sig, job_id)
+        logger.debug("Sent signal {} to job {}", sig, job_id)
 
     def name(self) -> str:
         return f"slurm_sfapi({self._machine})"

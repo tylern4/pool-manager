@@ -1,19 +1,17 @@
-import logging
 import os
 import shlex
 import subprocess
 
-from pool_manager.log import TRACE
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
+from loguru import logger
 
-log = logging.getLogger("pool_manager.scheduler.pbs_subprocess")
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, _test_job_id
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
-    log.debug("Running: %s", shlex.join(cmd))
+    logger.debug("Running: {}", shlex.join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    log.log(TRACE, "stdout: %s", result.stdout.strip())
-    log.log(TRACE, "stderr: %s", result.stderr.strip())
+    logger.trace("stdout: {}", result.stdout.strip())
+    logger.trace("stderr: {}", result.stderr.strip())
     return result
 
 
@@ -37,9 +35,9 @@ class PBSSubprocessBackend(SchedulerBackend):
 
         if self._test_mode:
             job_id = _test_job_id()
-            log.info("[TEST] Would run: %s", shlex.join(cmd))
-            log.info(
-                "[TEST] Would submit job %s (script=%s, args=%s)",
+            logger.info("[TEST] Would run: {}", shlex.join(cmd))
+            logger.info(
+                "[TEST] Would submit job {} (script={}, args={})",
                 job_id,
                 script_path,
                 submit_args,
@@ -51,28 +49,28 @@ class PBSSubprocessBackend(SchedulerBackend):
             raise RuntimeError(f"qsub failed (exit {result.returncode}): {result.stderr.strip()}")
 
         job_id = result.stdout.strip()
-        log.debug("Submitted PBS job %s (script=%s)", job_id, script_path)
+        logger.debug("Submitted PBS job {} (script={})", job_id, script_path)
         return job_id
 
     def cancel(self, job_id: str) -> None:
         cmd = ["qdel", job_id]
         if self._test_mode:
-            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            logger.info("[TEST] Would run: {}", shlex.join(cmd))
             return
 
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning(
-                "qdel %s failed (exit %d): %s", job_id, result.returncode, result.stderr.strip()
+            logger.warning(
+                "qdel {} failed (exit {}): {}", job_id, result.returncode, result.stderr.strip()
             )
         else:
-            log.debug("Cancelled PBS job %s", job_id)
+            logger.debug("Cancelled PBS job {}", job_id)
 
     def list_active(self) -> list[JobInfo]:
         cmd = ["qstat", "-x", "-u", self._user]
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning("qstat failed (exit %d): %s", result.returncode, result.stderr.strip())
+            logger.warning("qstat failed (exit {}): {}", result.returncode, result.stderr.strip())
             return []
 
         jobs: list[JobInfo] = []
@@ -88,26 +86,26 @@ class PBSSubprocessBackend(SchedulerBackend):
             state = _parse_pbs_state(state_str)
             jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
 
-        log.debug("Active PBS jobs: %s", [j.job_id for j in jobs])
+        logger.debug("Active PBS jobs: {}", [j.job_id for j in jobs])
         return jobs
 
     def signal(self, job_id: str, sig: str) -> None:
         cmd = ["qsig", "-s", sig, job_id]
         if self._test_mode:
-            log.info("[TEST] Would run: %s", shlex.join(cmd))
+            logger.info("[TEST] Would run: {}", shlex.join(cmd))
             return
 
         result = _run(cmd)
         if result.returncode != 0:
-            log.warning(
-                "qsig %s %s failed (exit %d): %s",
+            logger.warning(
+                "qsig {} {} failed (exit {}): {}",
                 sig,
                 job_id,
                 result.returncode,
                 result.stderr.strip(),
             )
         else:
-            log.debug("Sent signal %s to PBS job %s", sig, job_id)
+            logger.debug("Sent signal {} to PBS job {}", sig, job_id)
 
     def name(self) -> str:
         return "pbs_subprocess"

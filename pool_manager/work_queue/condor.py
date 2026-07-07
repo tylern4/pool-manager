@@ -1,10 +1,7 @@
-import logging
+from loguru import logger
 
-from pool_manager.log import TRACE
 from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend, WorkQueue
-
-log = logging.getLogger("pool_manager.work_queue.condor")
 
 
 class CondorWorkQueue(WorkQueue):
@@ -14,7 +11,7 @@ class CondorWorkQueue(WorkQueue):
 
     def count_idle(self) -> int:
         count = self._backend.count_idle(constraint=self._constraint)
-        log.debug("Idle jobs count=%d via %s", count, self._backend.name())
+        logger.debug("Idle jobs count={} via {}", count, self._backend.name())
         return count
 
     def list_idle(self) -> list[TaskResources]:
@@ -23,24 +20,22 @@ class CondorWorkQueue(WorkQueue):
             total_cpus = sum(t.cpus for t in tasks)
             total_mem = sum(t.memory_mb for t in tasks)
             total_gpus = sum(t.gpus for t in tasks)
-            log.info(
-                "Idle tasks: count=%d cpus=%.1f mem=%dMB gpus=%d",
+            logger.info(
+                "Idle tasks: count={} cpus={} mem={}MB gpus={}",
                 len(tasks),
                 total_cpus,
                 total_mem,
                 total_gpus,
             )
-            if log.isEnabledFor(TRACE):
-                for task in tasks:
-                    log.log(
-                        TRACE,
-                        "Task: cpus=%s mem=%dMB gpus=%d",
-                        task.cpus,
-                        task.memory_mb,
-                        task.gpus,
-                    )
+            for task in tasks:
+                logger.trace(
+                    "Task: cpus={} mem={}MB gpus={}",
+                    task.cpus,
+                    task.memory_mb,
+                    task.gpus,
+                )
         else:
-            log.debug("No idle tasks via %s", self._backend.name())
+            logger.debug("No idle tasks via {}", self._backend.name())
         return tasks
 
     def name(self) -> str:

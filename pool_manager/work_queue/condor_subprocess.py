@@ -1,13 +1,11 @@
 import json
-import logging
 import shlex
 import subprocess
 
-from pool_manager.log import TRACE
+from loguru import logger
+
 from pool_manager.placement import TaskResources
 from pool_manager.work_queue.base import CondorBackend
-
-log = logging.getLogger("pool_manager.work_queue.condor_subprocess")
 
 
 class CondorSubprocessBackend(CondorBackend):
@@ -21,13 +19,13 @@ class CondorSubprocessBackend(CondorBackend):
         if constraint:
             cmd.extend(["-constraint", constraint])
 
-        log.debug("Running condor_q command: %s", shlex.join(cmd))
+        logger.debug("Running condor_q command: {}", shlex.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        log.log(TRACE, "condor_q stdout (first 2000): %s", result.stdout[:2000])
-        log.log(TRACE, "condor_q stderr: %s", result.stderr.strip())
+        logger.trace("condor_q stdout (first 2000): {}", result.stdout[:2000])
+        logger.trace("condor_q stderr: {}", result.stderr.strip())
 
         if result.returncode != 0:
-            log.warning("condor_q exited %d: %s", result.returncode, result.stderr.strip())
+            logger.warning("condor_q exited {}: {}", result.returncode, result.stderr.strip())
             return []
 
         if not result.stdout.strip():
@@ -36,7 +34,7 @@ class CondorSubprocessBackend(CondorBackend):
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as e:
-            log.warning("Failed to parse condor_q JSON output: %s", e)
+            logger.warning("Failed to parse condor_q JSON output: {}", e)
             return []
 
     def count_idle(self, constraint: str = "") -> int:
@@ -47,14 +45,15 @@ class CondorSubprocessBackend(CondorBackend):
         jobs = self._query_json(constraint)
         tasks = []
         for job in jobs:
+            job = {k.lower(): v for k, v in job.items()}
             tasks.append(
                 TaskResources(
-                    cpus=float(job.get("RequestCpus", 1) or 1),
-                    memory_mb=int(job.get("RequestMemory", 1024) or 1024),
-                    gpus=int(job.get("RequestGpus", 0) or 0),
+                    cpus=float(job.get("requestcpus", 1)),
+                    memory_mb=int(job.get("requestmemory", 1024)),
+                    gpus=int(job.get("requestgpus", 0)),
                 )
             )
-        log.debug("Parsed %d idle job(s) with task resources", len(tasks))
+        logger.debug("Parsed {} idle job(s) with task resources", len(tasks))
         return tasks
 
     def name(self) -> str:
