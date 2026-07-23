@@ -40,6 +40,7 @@ class Config:
     log_level: str = "INFO"
     log_mode: str = "stdout"
     log_file: str = ""
+    metrics_port: int = 0
     work_queue: WorkQueueConfig = field(default_factory=WorkQueueConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     scaling: ScalingPolicy = field(default_factory=ScalingPolicy)
@@ -77,6 +78,7 @@ class Config:
             log_level=raw.get("log_level", "INFO"),
             log_mode=raw.get("log_mode", "stdout"),
             log_file=raw.get("log_file", ""),
+            metrics_port=raw.get("metrics_port", 0),
             work_queue=WorkQueueConfig(
                 backend=wk.get("backend", "condor_python"),
                 schedd_name=wk.get("schedd_name", ""),

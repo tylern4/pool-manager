@@ -4,6 +4,8 @@ log_level: INFO
 # Logging destination: stdout (colored), file (plain), or both
 log_mode: stdout
 # log_file: pool-manager.log
+# Prometheus metrics endpoint (0 to disable)
+metrics_port: 9090
 
 # Scaling policy
 scaling:
