@@ -11,6 +11,15 @@ except ImportError:
 from loguru import logger
 
 from pool_manager.config import Config
+from pool_manager.metrics import (
+    SCALE_DOWN_EVENTS,
+    SCALE_UP_EVENTS,
+    TICK_DURATION,
+    WORKERS_STARTED,
+    WORKERS_STOPPED,
+    start_metrics_server,
+    update_metrics,
+)
 from pool_manager.placement import Placement, PlacementPlanner, TaskResources
 from pool_manager.scheduler import (
     HTCondorRESTAPIBackend,
@@ -121,6 +130,7 @@ class PoolManager:
         self._last_scale_down = 0.0
         self._drain_start: float | None = None
         self._daemon_shutdown = False
+        self._last_plan: list[Placement] = []
 
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -148,6 +158,15 @@ class PoolManager:
                 len(self._config.scheduler.node_configs),
             )
 
+        if self._config.metrics_port > 0:
+            try:
+                start_metrics_server(self._config.metrics_port)
+                logger.info("Metrics server started on port {}", self._config.metrics_port)
+            except Exception:
+                logger.exception(
+                    "Failed to start metrics server on port {}", self._config.metrics_port
+                )
+
         self._recover_state()
 
         try:
@@ -169,20 +188,37 @@ class PoolManager:
         logger.info("Pool manager stopped")
 
     def _tick(self):
-        tasks = self._wq.list_idle()
-        plan = self._planner.plan_for_tasks(tasks)
-        target = sum(p.count for p in plan)
-        target = max(self._policy.min_workers, min(self._policy.max_workers, target))
-        logger.debug(
-            "Tick: idle={} target={} active={} draining={}",
-            len(tasks),
-            target,
-            self._active_count(),
-            self._draining_count(),
-        )
+        import time as time_mod
 
-        self._reconcile()
-        self._scale(tasks, plan, target)
+        start_time = time_mod.monotonic()
+        try:
+            tasks = self._wq.list_idle()
+            plan = self._planner.plan_for_tasks(tasks)
+            self._last_plan = plan
+            target = sum(p.count for p in plan)
+            target = max(self._policy.min_workers, min(self._policy.max_workers, target))
+            logger.debug(
+                "Tick: idle={} target={} active={} draining={}",
+                len(tasks),
+                target,
+                self._active_count(),
+                self._draining_count(),
+            )
+
+            self._reconcile()
+            self._scale(tasks, plan, target)
+
+            states = {jid: ji.state for jid, ji in self._tracked.items()}
+            update_metrics(
+                idle_count=len(tasks),
+                target=target,
+                tracked=states,
+                node_assignments=self._node_assignments,
+                placements=plan,
+            )
+        finally:
+            duration = time_mod.monotonic() - start_time
+            TICK_DURATION.observe(duration)
 
     def _recover_state(self):
         active = self._sched.list_active()
@@ -225,6 +261,7 @@ class PoolManager:
                 logger.info("Job {} no longer active (was {})", jid, tracked.state.value)
             self._tracked[jid] = JobInfo(job_id=jid, state=JobState.EXITED)
             self._node_assignments.pop(jid, None)
+            WORKERS_STOPPED.inc()
 
     def _scale(self, tasks: list[TaskResources], plan: list[Placement], target: int):
         active = self._active_count()
@@ -241,6 +278,7 @@ class PoolManager:
             self._start_workers(plan, to_add)
             self._last_scale_up = now
             self._drain_start = None
+            SCALE_UP_EVENTS.inc()
 
         elif target < active:
             if not self._daemon_shutdown:
@@ -261,6 +299,7 @@ class PoolManager:
             )
             self._signal_workers(excess, plan=plan)
             self._last_scale_down = now
+            SCALE_DOWN_EVENTS.inc()
 
             can_force = (
                 self._draining_count() > 0
@@ -363,6 +402,7 @@ class PoolManager:
                 self._tracked[job_id] = JobInfo(job_id=job_id, state=JobState.PENDING)
                 self._node_assignments[job_id] = "default"
                 logger.info("Started worker {} ({})", job_id, self._sched.name())
+                WORKERS_STARTED.inc()
             except Exception:
                 logger.exception("Failed to start worker {}/{}", i + 1, count)
 
@@ -397,6 +437,7 @@ class PoolManager:
                     self._tracked[job_id] = JobInfo(job_id=job_id, state=JobState.PENDING)
                     self._node_assignments[job_id] = nc.name
                     logger.info("Started worker {} ({}) on {}", job_id, self._sched.name(), nc.name)
+                    WORKERS_STARTED.inc()
                 except Exception:
                     logger.exception("Failed to start worker on {}", nc.name)
             remaining -= batch

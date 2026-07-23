@@ -9,6 +9,7 @@ from pool_manager.config import Config
 from pool_manager.log import setup_logging
 from pool_manager.manager import PoolManager, _make_scheduler, _make_work_queue
 from pool_manager.placement import PlacementPlanner, TaskResources
+from pool_manager.tui import run_tui
 
 
 def main():
@@ -30,6 +31,9 @@ def main():
         "run", parents=[base_parser], help="Run the pool manager daemon"
     )
     run_parser.set_defaults(command="run")
+
+    tui_parser = subparsers.add_parser("tui", parents=[base_parser], help="Run the TUI dashboard")
+    tui_parser.set_defaults(command="tui")
 
     strategy_parser = subparsers.add_parser(
         "test-strategy",
@@ -63,6 +67,8 @@ def main():
 
     if args.command == "run":
         _run_daemon(args)
+    elif args.command == "tui":
+        _run_tui(args)
     elif args.command == "test-strategy":
         _run_test_strategy(args)
 
@@ -96,6 +102,11 @@ def _run_daemon(args):
         pm.run()
     except KeyboardInterrupt:
         logger.info("Interrupted")
+
+
+def _run_tui(args):
+    config_path = getattr(args, "config", "pool-manager.yaml")
+    run_tui(config_path)
 
 
 def _run_test_strategy(args):

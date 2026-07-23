@@ -220,6 +220,49 @@ nodes.
 Per-node resource requirements (`cpus-per-task`, `mem`, `gpus`) are injected
 into each worker's submit args automatically.
 
+### Metrics
+
+Enable Prometheus metrics by setting `metrics_port` in the config:
+
+```yaml
+metrics_port: 9090
+```
+
+Available metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `pool_manager_idle_jobs` | Gauge | Number of idle HTCondor jobs |
+| `pool_manager_active_workers` | Gauge | Number of active workers |
+| `pool_manager_pending_workers` | Gauge | Number of pending workers |
+| `pool_manager_running_workers` | Gauge | Number of running workers |
+| `pool_manager_draining_workers` | Gauge | Number of draining workers |
+| `pool_manager_target_workers` | Gauge | Target number of workers |
+| `pool_manager_workers_started_total` | Counter | Total workers started |
+| `pool_manager_workers_stopped_total` | Counter | Total workers stopped |
+| `pool_manager_scale_up_events_total` | Counter | Total scale-up events |
+| `pool_manager_scale_down_events_total` | Counter | Total scale-down events |
+| `pool_manager_tick_duration_seconds` | Histogram | Duration of main loop tick |
+| `pool_manager_workers_by_node_type` | Gauge | Workers by node type |
+
+Access metrics at `http://localhost:9090/metrics`.
+
+### TUI Dashboard
+
+Run the interactive terminal dashboard:
+
+```bash
+pool-manager tui
+pool-manager tui -c /path/to/config.yaml
+```
+
+The TUI displays:
+- Pool status (idle jobs, active/draining workers, uptime)
+- Placement plan by node type
+- Worker table with job IDs and states
+
+Press `q` to quit, `r` to refresh.
+
 ## Usage
 
 ### Daemon
