@@ -25,6 +25,7 @@ class JobInfo:
     job_id: str
     state: JobState
     job_name: str = ""
+    remaining_minutes: float | None = None
 
 
 def parse_config_name(job_name: str, prefix: str = "htcondor_worker_") -> str:
@@ -39,6 +40,8 @@ class NodeConfig:
     cpus: int = 1
     memory_mb: int = 1024
     gpus: int = 0
+    max_walltime_minutes: float | None = None
+    max_nodes: int | None = None
     submit_args: dict[str, str] | None = None
 
 

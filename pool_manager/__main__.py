@@ -1,132 +1,117 @@
-import argparse
 import json
-import sys
 from pathlib import Path
+from typing import Annotated
 
+import typer
 from loguru import logger
 
 from pool_manager.config import Config
 from pool_manager.log import setup_logging
 from pool_manager.manager import PoolManager, _make_scheduler, _make_work_queue
-from pool_manager.placement import PlacementPlanner, TaskResources
+from pool_manager.placement import TaskResources, make_placement_strategy
 from pool_manager.tui import run_tui
 
+app = typer.Typer(
+    name="pool-manager",
+    help="HTCondor → HPC scheduler pool manager.",
+    no_args_is_help=True,
+)
 
-def main():
-    parser = argparse.ArgumentParser(description="HTCondor → HPC scheduler pool manager")
-    subparsers = parser.add_subparsers(dest="command", help="Subcommand (default: run daemon)")
-
-    base_parser = argparse.ArgumentParser(add_help=False)
-    base_parser.add_argument(
-        "-c",
-        "--config",
-        default="pool-manager.yaml",
-        help="Path to config file (default: pool-manager.yaml)",
-    )
-    base_parser.add_argument(
-        "--log-level", default=None, help="Log level override (TRACE, DEBUG, INFO, WARNING)"
-    )
-
-    run_parser = subparsers.add_parser(
-        "run", parents=[base_parser], help="Run the pool manager daemon"
-    )
-    run_parser.set_defaults(command="run")
-
-    tui_parser = subparsers.add_parser("tui", parents=[base_parser], help="Run the TUI dashboard")
-    tui_parser.set_defaults(command="tui")
-
-    strategy_parser = subparsers.add_parser(
-        "test-strategy",
-        parents=[base_parser],
-        help="Test placement strategy with condor_q -json output",
-    )
-    strategy_parser.add_argument(
-        "json_file",
-        help="Path to JSON file containing condor_q -json output",
-    )
-    strategy_parser.add_argument(
-        "--running",
-        "-r",
-        type=int,
-        default=None,
-        help="Current number of running workers",
-    )
-    strategy_parser.add_argument(
-        "--running-type",
-        "-rt",
-        action="append",
-        default=[],
-        metavar="TYPE=COUNT",
-        help=("Current running count per node type (repeatable, e.g. -rt small=3 -rt large=2)"),
-    )
-
-    args = parser.parse_args()
-
-    if args.command is None:
-        args.command = "run"
-
-    if args.command == "run":
-        _run_daemon(args)
-    elif args.command == "tui":
-        _run_tui(args)
-    elif args.command == "test-strategy":
-        _run_test_strategy(args)
+CONFIG_OPT = Annotated[
+    str,
+    typer.Option("-c", "--config", help="Path to config file.", show_default=True),
+]
+LOG_LEVEL_OPT = Annotated[
+    str | None,
+    typer.Option("--log-level", help="Log level override (TRACE, DEBUG, INFO, WARNING)."),
+]
 
 
-def _run_daemon(args):
-    config_path = getattr(args, "config", "pool-manager.yaml")
-    config = Config.from_file(Path(config_path))
+@app.command()
+def run(config: CONFIG_OPT = "pool-manager.yaml", log_level: LOG_LEVEL_OPT = None):
+    """Run the pool manager daemon."""
+    cfg = Config.from_file(Path(config))
 
-    level = getattr(args, "log_level", None) or config.log_level
-    setup_logging(level, log_mode=config.log_mode, log_file=config.log_file)
-    logger.info("Loading config from {}", config_path)
+    level = log_level or cfg.log_level
+    setup_logging(level, log_mode=cfg.log_mode, log_file=cfg.log_file)
+    logger.info("Loading config from {}", config)
     logger.debug(
         "Config: poll_interval={} min={} max={} batch={} backend={} scheduler={}",
-        config.poll_interval,
-        config.scaling.min_workers,
-        config.scaling.max_workers,
-        config.scaling.batch_size,
-        config.work_queue.backend,
-        config.scheduler.backend,
+        cfg.poll_interval,
+        cfg.scaling.min_workers,
+        cfg.scaling.max_workers,
+        cfg.scaling.batch_size,
+        cfg.work_queue.backend,
+        cfg.scheduler.backend,
     )
 
     try:
-        wq = _make_work_queue(config)
-        sched = _make_scheduler(config)
+        wq = _make_work_queue(cfg)
+        sched = _make_scheduler(cfg)
     except ValueError as e:
         logger.error("Configuration error: {}", e)
-        sys.exit(1)
+        raise typer.Exit(1)
 
-    pm = PoolManager(config=config, work_queue=wq, scheduler=sched)
+    pm = PoolManager(config=cfg, work_queue=wq, scheduler=sched)
     try:
         pm.run()
     except KeyboardInterrupt:
         logger.info("Interrupted")
 
 
-def _run_tui(args):
-    config_path = getattr(args, "config", "pool-manager.yaml")
-    run_tui(config_path)
+@app.command()
+def tui(config: CONFIG_OPT = "pool-manager.yaml", log_level: LOG_LEVEL_OPT = None):
+    """Run the TUI dashboard."""
+    run_tui(config)
 
 
-def _run_test_strategy(args):
-    level = getattr(args, "log_level", None) or "WARNING"
-    setup_logging(level)
+@app.command()
+def test_strategy(
+    json_file: Annotated[Path, typer.Argument(help="Path to condor_q -json output file.")],
+    config: CONFIG_OPT = "pool-manager.yaml",
+    log_level: LOG_LEVEL_OPT = None,
+    running: Annotated[
+        int | None, typer.Option("-r", "--running", help="Current number of running workers.")
+    ] = None,
+    running_type: Annotated[
+        list[str] | None,
+        typer.Option(
+            "-rt",
+            "--running-type",
+            help="Running count per node type (repeatable, e.g. -rt small=3 -rt large=2).",
+        ),
+    ] = None,
+    strategy: Annotated[
+        str | None,
+        typer.Option(
+            "-s",
+            "--strategy",
+            help="Override strategy (high-throughput or runtime-packing).",
+        ),
+    ] = None,
+    max_walltime: Annotated[
+        float | None, typer.Option("--max-walltime", help="Override max_walltime_minutes.")
+    ] = None,
+    runtime_buffer: Annotated[
+        float | None, typer.Option("--runtime-buffer", help="Override runtime_buffer.")
+    ] = None,
+):
+    """Test placement strategy with condor_q -json output."""
+    setup_logging(log_level or "WARNING")
 
-    config_path = getattr(args, "config", "pool-manager.yaml")
-    config = Config.from_file(Path(config_path))
-    ncs = config.scheduler.node_configs
-    policy = config.scaling
+    cfg = Config.from_file(Path(config))
+    ncs = cfg.scheduler.node_configs
+    policy = cfg.scaling
 
-    json_path = Path(args.json_file)
-    if not json_path.exists():
-        print(f"Error: JSON file not found: {args.json_file}", file=sys.stderr)
-        sys.exit(1)
-    raw = json.loads(json_path.read_text())
+    strategy_name = strategy or policy.strategy
+    max_walltime_val = max_walltime or policy.max_walltime_minutes
+    runtime_buffer_val = runtime_buffer or policy.runtime_buffer
+
+    raw = json.loads(Path(json_file).read_text())
 
     if not isinstance(raw, list):
-        print("Error: JSON file must contain a list of job classads", file=sys.stderr)
-        sys.exit(1)
+        typer.echo("Error: JSON file must contain a list of job classads", err=True)
+        raise typer.Exit(1)
 
     tasks = []
     for job in raw:
@@ -136,56 +121,78 @@ def _run_test_strategy(args):
                 cpus=float(job.get("requestcpus", 1)),
                 memory_mb=int(job.get("requestmemory", 1024)),
                 gpus=int(job.get("requestgpus", 0)),
+                runtime_minutes=float(job.get("runtime_minutes", 0)),
             )
         )
 
-    planner = PlacementPlanner(
+    planner = make_placement_strategy(
+        strategy=strategy_name,
         node_configs=ncs if ncs else None,
         task_resources=policy.task_resources,
         batch_size=policy.batch_size,
         max_workers=policy.max_workers,
         min_workers=policy.min_workers,
+        max_walltime_minutes=max_walltime_val,
+        runtime_buffer=runtime_buffer_val,
     )
 
     placements = planner.plan_for_tasks(tasks)
-    target = planner.target_size(len(tasks))
+    target = max(
+        planner._min_workers,
+        min(planner._max_workers, sum(p.count for p in placements)),
+    )
 
-    running_total = args.running
+    running_total = running
     running_per_type: dict[str, int] = {}
-    for rt in args.running_type:
-        if "=" not in rt:
-            print(f"Error: --running-type must be TYPE=COUNT, got '{rt}'", file=sys.stderr)
-            sys.exit(1)
-        name, count_str = rt.split("=", 1)
-        try:
-            running_per_type[name] = int(count_str)
-        except ValueError:
-            print(f"Error: invalid count for --running-type '{rt}'", file=sys.stderr)
-            sys.exit(1)
+    if running_type:
+        for rt in running_type:
+            if "=" not in rt:
+                typer.echo(f"Error: --running-type must be TYPE=COUNT, got '{rt}'", err=True)
+                raise typer.Exit(1)
+            name, count_str = rt.split("=", 1)
+            try:
+                running_per_type[name] = int(count_str)
+            except ValueError:
+                typer.echo(f"Error: invalid count for --running-type '{rt}'", err=True)
+                raise typer.Exit(1)
 
     if running_total is None and running_per_type:
         running_total = sum(running_per_type.values())
 
-    print(f"Tasks: {len(tasks)}")
+    typer.echo(f"Strategy: {strategy_name}")
+    typer.echo(f"Tasks: {len(tasks)}")
     nc_list = ", ".join(n.name for n in ncs) if ncs else "none"
-    print(f"Node configs: {len(ncs)} ({nc_list})")
+    typer.echo(f"Node configs: {len(ncs)} ({nc_list})")
     target_info = ""
     if ncs:
         target_info = f" (max={policy.max_workers}, min={policy.min_workers})"
-    print(f"Target workers: {target}{target_info}")
+    typer.echo(f"Target workers: {target}{target_info}")
+
+    if strategy_name == "runtime-packing":
+        runtimes = [t.runtime_minutes for t in tasks if t.runtime_minutes > 0]
+        if runtimes:
+            typer.echo(
+                f"Task runtimes: min={min(runtimes):.0f}m max={max(runtimes):.0f}m "
+                f"avg={sum(runtimes) / len(runtimes):.0f}m"
+            )
+        else:
+            typer.echo(
+                f"Task runtimes: none reported (using max_walltime={max_walltime_val}m as default)"
+            )
+        typer.echo(f"Max walltime: {max_walltime_val}m  Buffer: {runtime_buffer_val * 100:.0f}%")
 
     if running_total is not None:
         delta = target - running_total
         if delta > 0:
-            print(f"Current workers: {running_total}  (add {delta})")
+            typer.echo(f"Current workers: {running_total}  (add {delta})")
         elif delta < 0:
-            print(f"Current workers: {running_total}  (remove {-delta})")
+            typer.echo(f"Current workers: {running_total}  (remove {-delta})")
         else:
-            print(f"Current workers: {running_total}  (no change)")
+            typer.echo(f"Current workers: {running_total}  (no change)")
 
     if running_per_type and placements:
-        print()
-        print("Per-type scaling:")
+        typer.echo("")
+        typer.echo("Per-type scaling:")
         desired_counts: dict[str, int] = {}
         for p in placements:
             desired_counts[p.node_config.name] = desired_counts.get(p.node_config.name, 0) + p.count
@@ -194,35 +201,32 @@ def _run_test_strategy(args):
             cur = running_per_type.get(t, 0)
             des = desired_counts.get(t, 0)
             if cur < des:
-                print(f"  {t}: {cur} -> {des}  (+{des - cur})")
+                typer.echo(f"  {t}: {cur} -> {des}  (+{des - cur})")
             elif cur > des:
-                print(f"  {t}: {cur} -> {des}  (-{cur - des})")
+                typer.echo(f"  {t}: {cur} -> {des}  (-{cur - des})")
             else:
-                print(f"  {t}: {cur} -> {des}  (no change)")
+                typer.echo(f"  {t}: {cur} -> {des}  (no change)")
 
-    print()
+    typer.echo("")
 
     if not placements:
-        print("No placement needed")
+        typer.echo("No placement needed")
         return
 
-    print("Placement plan:")
+    typer.echo("Placement plan:")
     total = 0
     for p in placements:
         nc = p.node_config
         detail = ""
         if ncs:
             detail = f" (cpus={nc.cpus} mem={nc.memory_mb}MB gpus={nc.gpus})"
-        print(f"  {nc.name} x {p.count}{detail}")
+        walltime_info = f" walltime={p.walltime}" if p.walltime else ""
+        typer.echo(f"  {nc.name} x {p.count}{detail}{walltime_info}")
         total += p.count
 
-    print(f"\nTotal nodes: {total}")
+    typer.echo(f"\nTotal nodes: {total}")
     if tasks:
-        print(f"Total tasks placed: {len(tasks)}", end="")
+        msg = f"Total tasks placed: {len(tasks)}"
         if total > 0:
-            print(f" ({len(tasks) // total} avg tasks/node)", end="")
-        print()
-
-
-if __name__ == "__main__":
-    main()
+            msg += f" ({len(tasks) // total} avg tasks/node)"
+        typer.echo(msg)

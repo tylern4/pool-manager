@@ -43,18 +43,18 @@ scheduler:
   node_configs:
     - name: small
       cpus: 4
-      memory_mb: 8000
+      memory_gb: 8
       gpus: 0
       submit_args:
-        partition: debug
+        queue: debug
     - name: large
       cpus: 16
-      memory_mb: 64000
+      memory_gb: 64
       gpus: 0
       # no submit_args → inherits scheduler defaults
   # These are passed as --key=value to sbatch (or -key value to qsub)
   submit_args:
-    partition: defq
+    queue: defq
     account: myproject
     time: "08:00:00"
     nodes: 1

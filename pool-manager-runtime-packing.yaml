@@ -1,0 +1,56 @@
+# Pool Manager Configuration — Runtime-Packing Strategy
+#
+# Strategy: pack tasks into few nodes with long walltimes.
+# Processes tasks in batches on each node, minimizing total node count.
+# Uses more walltime per node but fewer nodes overall.
+#
+# Example: 1000 tasks × 32 cores × 5 min on 256-core nodes
+#   → 1 node × 11:30:00 walltime (instead of 125 nodes × 5 min)
+#
+# Runtime comes from HTCondor classad "runtime_minutes".
+# If not set, falls back to max_walltime_minutes.
+#
+# Per-node max_walltime_minutes overrides the global max_walltime_minutes.
+
+poll_interval: 15
+log_level: INFO
+log_mode: stdout
+metrics_port: 9090
+
+scaling:
+  strategy: runtime-packing
+  min_workers: 0
+  max_workers: 50
+  runtime_buffer: 0.1       # 10% buffer on walltime calculation
+  scale_up_cooldown: 30
+  scale_down_cooldown: 60
+  drain_timeout: 120
+
+work_queue:
+  backend: condor_python
+  schedd_name: ""
+  constraint: ""
+
+scheduler:
+  backend: slurm_subprocess
+  worker_script: /path/to/htcondor_worker.sh
+  node_configs:
+    - name: regular
+      cpus: 256
+      memory_gb: 500
+      gpus: 0
+      max_walltime_minutes: 2880  # 48 hours — pack tasks across long-running nodes
+      submit_args:
+        queue: regular
+    - name: debug
+      cpus: 256
+      memory_gb: 500
+      gpus: 0
+      max_walltime_minutes: 30   # 30 minutes — limited walltime
+      max_nodes: 8               # at most 8 debug nodes
+      submit_args:
+        queue: debug
+  submit_args:
+    account: myproject
+    nodes: 1
+    ntasks: 1

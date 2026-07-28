@@ -4,7 +4,12 @@ import pytest
 
 from pool_manager.config import Config, SchedulerConfig, WorkQueueConfig
 from pool_manager.manager import PoolManager, _make_scheduler, _make_work_queue
-from pool_manager.placement import NodeConfig, Placement, TaskResources
+from pool_manager.placement import (
+    NodeConfig,
+    Placement,
+    RuntimePackingPlanner,
+    TaskResources,
+)
 from pool_manager.scaling import ScalingPolicy
 from pool_manager.scheduler.base import JobInfo, JobState
 
@@ -28,6 +33,7 @@ def mock_work_queue():
         TaskResources(cpus=1, memory_mb=1024, gpus=0),
         TaskResources(cpus=1, memory_mb=1024, gpus=0),
     ]
+    wq.list_worker_status.return_value = []
     wq.name.return_value = "test_queue"
     return wq
 
@@ -38,6 +44,9 @@ def make_config(node_configs=None, **overrides):
         min_workers=sc.get("min_workers", 0),
         max_workers=sc.get("max_workers", 16),
         batch_size=sc.get("batch_size", 1),
+        strategy=sc.get("strategy", "high-throughput"),
+        max_walltime_minutes=sc.get("max_walltime_minutes", 1440),
+        runtime_buffer=sc.get("runtime_buffer", 0.1),
     )
     return Config(
         poll_interval=0.1,
@@ -182,7 +191,6 @@ class TestManagerPlacement:
         )
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         tasks = [TaskResources(cpus=1, memory_mb=1024)] * 9
-        # 9 idle tasks: big fits 4 per node → 3 ceil(9/4) big nodes
         plan = mgr._planner.plan_for_tasks(tasks)
         assert len(plan) == 1
         assert plan[0].node_config.name == "big"
@@ -224,8 +232,6 @@ class TestSignalWorkers:
         mgr._node_assignments["1"] = "small"
         mgr._node_assignments["2"] = "small"
         mgr._node_assignments["3"] = "small"
-        # plan_for_tasks([]) with min_workers=0 returns [] → no nodes desired
-        # so all 3 should be drained (excess = 3)
         plan = mgr._planner.plan_for_tasks([])
         mgr._signal_workers(3, plan=plan)
         assert mock_scheduler.signal.call_count == 3
@@ -240,10 +246,8 @@ class TestSignalWorkers:
         mgr._node_assignments["1"] = "small"
         mgr._node_assignments["2"] = "small"
         mgr._node_assignments["3"] = "small"
-        # plan_for_tasks([]) with min_workers=1 returns [small x 1]
         plan = mgr._planner.plan_for_tasks([])
         mgr._signal_workers(3, plan=plan)
-        # 3 active - 1 desired = 2 excess
         assert mock_scheduler.signal.call_count == 2
 
     def test_signal_workers_drains_unused_node_type_first(self, mock_scheduler, mock_work_queue):
@@ -259,10 +263,8 @@ class TestSignalWorkers:
         mgr._node_assignments["1"] = "small"
         mgr._node_assignments["2"] = "large"
         mgr._node_assignments["3"] = "large"
-        # plan_for_tasks([]) with min=0 returns []
         plan = mgr._planner.plan_for_tasks([])
         mgr._signal_workers(2, plan=plan)
-        # both large nodes should be drained first (higher cost, not in plan)
         called_ids = [call[0][0] for call in mock_scheduler.signal.call_args_list]
         assert "2" in called_ids
         assert "3" in called_ids
@@ -279,7 +281,6 @@ class TestSignalWorkers:
         mgr._tracked["2"] = JobInfo(job_id="2", state=JobState.RUNNING)
         mgr._node_assignments["1"] = "large"
         mgr._node_assignments["2"] = "small"
-        # plan_for_tasks([]) with min=0 returns []
         plan = mgr._planner.plan_for_tasks([])
         mgr._signal_workers(1, plan=plan)
         assert mock_scheduler.signal.call_count == 1
@@ -297,8 +298,66 @@ class TestSignalWorkers:
             JobInfo(job_id="1", state=JobState.RUNNING),
         ]
         mgr._reconcile()
-        assert "1" in mgr._node_assignments  # still active
-        assert "2" not in mgr._node_assignments  # lost job, cleaned up
+        assert "1" in mgr._node_assignments
+        assert "2" not in mgr._node_assignments
+
+    def test_signal_workers_cancels_pending_first(self, mock_scheduler, mock_work_queue):
+
+        cfg = make_config()
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        mgr._tracked["p1"] = JobInfo(job_id="p1", state=JobState.PENDING)
+        mgr._tracked["r1"] = JobInfo(job_id="r1", state=JobState.RUNNING)
+        mock_work_queue.list_worker_status.return_value = []
+        mgr._signal_workers(2)
+        assert mock_scheduler.cancel.call_count == 1
+        assert mock_scheduler.cancel.call_args[0][0] == "p1"
+        assert mock_scheduler.signal.call_count == 1
+        assert mock_scheduler.signal.call_args[0][0] == "r1"
+
+    def test_signal_workers_skips_jobs_with_active_tasks(self, mock_scheduler, mock_work_queue):
+        from pool_manager.work_queue.base import WorkerSlotStatus
+
+        cfg = make_config()
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        mgr._tracked["r1"] = JobInfo(job_id="r1", state=JobState.RUNNING)
+        mgr._tracked["r2"] = JobInfo(job_id="r2", state=JobState.RUNNING)
+        mgr._tracked["r3"] = JobInfo(job_id="r3", state=JobState.RUNNING)
+        mock_work_queue.list_worker_status.return_value = [
+            WorkerSlotStatus(slot_name="slot1", owner_job_id="r1", state="Busy"),
+            WorkerSlotStatus(slot_name="slot2", owner_job_id="r2", state="Busy"),
+        ]
+        mgr._signal_workers(2)
+        # r1 and r2 have active tasks, only r3 should be drained
+        assert mock_scheduler.signal.call_count == 1
+        assert mock_scheduler.signal.call_args[0][0] == "r3"
+
+    def test_signal_workers_prefers_pending_over_idle_running(
+        self, mock_scheduler, mock_work_queue
+    ):
+        from pool_manager.work_queue.base import WorkerSlotStatus
+
+        cfg = make_config()
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        mgr._tracked["p1"] = JobInfo(job_id="p1", state=JobState.PENDING)
+        mgr._tracked["r1"] = JobInfo(job_id="r1", state=JobState.RUNNING)
+        mock_work_queue.list_worker_status.return_value = [
+            WorkerSlotStatus(slot_name="slot1", owner_job_id="r1", state="Idle"),
+        ]
+        mgr._signal_workers(1)
+        # Should cancel pending first, not drain the idle running job
+        assert mock_scheduler.cancel.call_count == 1
+        assert mock_scheduler.cancel.call_args[0][0] == "p1"
+        assert mock_scheduler.signal.call_count == 0
+
+    def test_signal_workers_status_query_failure_graceful(self, mock_scheduler, mock_work_queue):
+        cfg = make_config()
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        mgr._tracked["r1"] = JobInfo(job_id="r1", state=JobState.RUNNING)
+        mock_work_queue.list_worker_status.side_effect = RuntimeError("condor_status failed")
+        mgr._signal_workers(1)
+        # Should still drain despite query failure
+        assert mock_scheduler.signal.call_count == 1
+        assert mock_scheduler.signal.call_args[0][0] == "r1"
 
 
 class TestManagerExtended:
@@ -357,7 +416,7 @@ class TestManagerExtended:
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         import time
 
-        mgr._last_scale_up = time.monotonic() - 1.0  # 1 second ago, cooldown=30
+        mgr._last_scale_up = time.monotonic() - 1.0
         plan = [Placement(node_config=NodeConfig(name="default"), count=3)]
         mgr._scale([TaskResources(cpus=1, memory_mb=1024)] * 5, plan, 3)
         assert not mock_scheduler.submit.called
@@ -488,7 +547,7 @@ class TestManagerExtended:
     def test_signal_workers_empty_active(self, mock_scheduler, mock_work_queue):
         cfg = make_config()
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
-        mgr._signal_workers(5)  # no tracked jobs
+        mgr._signal_workers(5)
         assert not mock_scheduler.signal.called
 
     def test_signal_workers_with_node_configs_no_plan(self, mock_scheduler, mock_work_queue):
@@ -497,7 +556,7 @@ class TestManagerExtended:
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         mgr._tracked["1"] = JobInfo(job_id="1", state=JobState.RUNNING)
         mgr._node_assignments["1"] = "small"
-        mgr._signal_workers(1)  # no plan → simple path (plan=None)
+        mgr._signal_workers(1)
         assert mock_scheduler.signal.called
 
     def test_signal_workers_failure_logged(self, mock_scheduler, mock_work_queue):
@@ -506,7 +565,6 @@ class TestManagerExtended:
         mgr._tracked["1"] = JobInfo(job_id="1", state=JobState.RUNNING)
         mock_scheduler.signal.side_effect = RuntimeError("signal failed")
         mgr._signal_workers(1)
-        # state unchanged because tracked is not updated on failure
         assert mgr._tracked["1"].state == JobState.RUNNING
 
     def test_daemon_shutdown_drains_all(self, mock_scheduler, mock_work_queue):
@@ -561,6 +619,90 @@ class TestManagerExtended:
         call = mock_scheduler.submit.call_args
         _script, args = call[0]
         assert args["gpus"] == "4"
+
+
+class TestManagerRuntimePacking:
+    def test_runtime_packing_strategy_creates_planner(self, mock_scheduler, mock_work_queue):
+        ncs = [NodeConfig(name="big", cpus=256, memory_mb=500000)]
+        cfg = make_config(
+            node_configs=ncs,
+            scaling={"strategy": "runtime-packing", "max_walltime_minutes": 1440},
+        )
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        assert isinstance(mgr._planner, RuntimePackingPlanner)
+
+    def test_start_workers_injects_walltime(self, mock_scheduler, mock_work_queue, tmp_path):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        ncs = [NodeConfig(name="big", cpus=256, memory_mb=500000)]
+        cfg = make_config(
+            node_configs=ncs,
+            worker_script=str(script),
+            scaling={"strategy": "runtime-packing", "max_walltime_minutes": 1440},
+        )
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        tasks = [TaskResources(cpus=32, memory_mb=32000, runtime_minutes=5)] * 1000
+        plan = mgr._planner.plan_for_tasks(tasks)
+        mgr._start_workers(plan, 1)
+        assert mock_scheduler.submit.call_count == 1
+        call = mock_scheduler.submit.call_args
+        _script, submit_args = call[0]
+        assert "time" in submit_args
+        assert submit_args["time"] == "00:30:00"
+
+    def test_start_workers_no_walltime_keeps_config_time(
+        self, mock_scheduler, mock_work_queue, tmp_path
+    ):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        ncs = [NodeConfig(name="big", cpus=16, memory_mb=65536)]
+        cfg = make_config(
+            node_configs=ncs,
+            worker_script=str(script),
+        )
+        cfg.scheduler.submit_args["time"] = "08:00:00"
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 8)
+        mgr._start_workers(plan, 1)
+        call = mock_scheduler.submit.call_args
+        _script, submit_args = call[0]
+        assert submit_args["time"] == "08:00:00"
+
+    def test_tick_runtime_packing(self, mock_scheduler, mock_work_queue, tmp_path):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        ncs = [NodeConfig(name="big", cpus=256, memory_mb=500000)]
+        cfg = make_config(
+            node_configs=ncs,
+            worker_script=str(script),
+            scaling={"strategy": "runtime-packing", "max_walltime_minutes": 1440},
+        )
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        mgr._tick()
+        assert mock_scheduler.submit.called
+
+    def test_start_workers_passes_walltime_through_adjusted_plan(
+        self, mock_scheduler, mock_work_queue, tmp_path
+    ):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        ncs = [NodeConfig(name="big", cpus=256, memory_mb=500000)]
+        cfg = make_config(
+            node_configs=ncs,
+            worker_script=str(script),
+            scaling={"strategy": "runtime-packing", "max_walltime_minutes": 1440},
+        )
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        tasks = [TaskResources(cpus=32, memory_mb=32000, runtime_minutes=5)] * 1000
+        plan = mgr._planner.plan_for_tasks(tasks)
+        mgr._start_workers(plan, 1)
+        assert mock_scheduler.submit.call_count == 1
+        call = mock_scheduler.submit.call_args
+        _script, submit_args = call[0]
+        assert "time" in submit_args
+        assert submit_args["time"] == "00:30:00"
+        assert submit_args["cpus-per-task"] == "256"
+        assert submit_args["mem"] == "500000M"
 
 
 class TestMakeFunctions:
@@ -716,7 +858,7 @@ class TestMakeFunctions:
         mgr._tracked["1"] = JobInfo(job_id="1", state=JobState.DRAINING)
         mock_scheduler.cancel.side_effect = RuntimeError("cancel failed")
         mgr._force_cancel_draining()
-        assert mgr._tracked["1"].state == JobState.DRAINING  # unchanged on failure
+        assert mgr._tracked["1"].state == JobState.DRAINING
 
     def test_run_keyboard_interrupt(self, mock_scheduler, mock_work_queue):
         cfg = make_config(scaling={"drain_on_stop": False, "min_workers": 0})
@@ -776,8 +918,6 @@ class TestMakeFunctions:
         mgr._tracked["1"] = JobInfo(job_id="1", state=JobState.RUNNING)
         mgr._node_assignments["1"] = "default"
         mgr._drain_all()
-        # _drain_all calls _signal_workers → state becomes DRAINING
-        # then _force_cancel_draining → state becomes EXITED
         assert mgr._tracked["1"].state == JobState.EXITED
 
     def test_drain_all_force_cancel_after_timeout(self, mock_scheduler, mock_work_queue):

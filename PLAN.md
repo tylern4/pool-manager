@@ -1,289 +1,225 @@
-# Pool Manager: HTCondor + SchedulerBackend Bridge
+# Runtime-Aware Scheduling Strategy
 
-## Overview
+## Goal
 
-A persistent daemon that monitors a work queue (HTCondor) and dynamically manages a pool of worker jobs on an HPC scheduler (Slurm, PBS, etc.). Each worker job runs a user-provided script (e.g. `htcondor_worker.sh`) that starts a condor worker daemon pulling jobs directly from the HTCondor schedd. When the queue has work, the daemon submits scheduler jobs; when the queue empties, it drains the pool gracefully.
+Add a new `RuntimePacking` placement strategy alongside the existing `HighThroughput` strategy, using an ABC-based strategy pattern for easy runtime switching.
 
-The entire system is built on pluggable abstract base classes so any component (queue probing, scheduler interaction) can be swapped out without changing the core logic.
-
-## Class Hierarchy
+## Architecture: ABC Strategy Pattern
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    PoolManager                       │
-│  (orchestrator — scaling loop, drain, health)        │
-│  ┌─────────────────┐    ┌─────────────────────────┐ │
-│  │   WorkQueue          │    │    SchedulerBackend     │ │
-│  │  (abstract)          │    │   (abstract)            │ │
-│  └────────┬─────────────┘    └──────────┬──────────────┘ │
-│           │                             │                │
-└───────────┼─────────────────────────────┼────────────────┘
-            │                             │
-            ▼                             ▼
-  ┌──────────────────────┐    ┌──────────────────────────┐
-  │ CondorWorkQueue       │    │ SchedulerWrapper         │
-  │  - PythonBackend      │    │  - wraps SchedulerBackend│
-  │  - SubprocessBackend  │    └──────────┬───────────────┘
-  │  - RESTAPIBackend     │               │
-  └──────────────────────┘               │
-                                          ▼
-                             ┌─────────────────────────────┐
-                             │ SlurmSubprocessBackend       │
-                             │ SlurmRESTAPIBackend          │
-                             │ SlurmSFAPIBackend            │
-                             │ PBSSubprocessBackend         │
-                             │ LocalSubprocessBackend       │
-                             │ HTCondorRESTAPIBackend       │
-                             └─────────────────────────────┘
+pool_manager/placement.py:
+
+  PlacementStrategy (ABC)        ← abstract base, shared helpers
+  ├── HighThroughputPlanner      ← current behavior (scale out)
+  └── RuntimePackingPlanner      ← new behavior (pack + long walltime)
+  
+  PlacementPlanner = HighThroughputPlanner  ← backward-compat alias
 ```
 
-## Abstract Base Classes
-
-### `WorkQueue` (abstract)
-
-Probes the source of work. Subclasses implement one method — how to count idle/pending work items.
+### ABC Base: `PlacementStrategy`
 
 ```python
-class WorkQueue(ABC):
+class PlacementStrategy(ABC):
+    def __init__(self, node_configs, task_resources, batch_size, max_workers, min_workers): ...
+    
     @abstractmethod
-    def count_idle(self) -> int: ...
+    def plan(self, idle_count: int) -> list[Placement]: ...
+    
     @abstractmethod
-    def name(self) -> str: ...
+    def plan_for_tasks(self, tasks: list[TaskResources]) -> list[Placement]: ...
+    
+    # Concrete shared methods:
+    def target_size(self, idle_count: int) -> int: ...      # calls self.plan()
+    def _plan_no_configs(self, idle_count) -> list[Placement]: ...  # simple batch path
+    def _plan_for_tasks_no_configs(self, tasks) -> list[Placement]: ...  # simple batch path
+    def _bin_pack_with_configs(self, tasks) -> list[tuple[NodeConfig, list[TaskResources]]]: ...
+    def _calculate_fit_per_node(self, node_config) -> int: ...
+    def _min_plan(self) -> list[Placement]: ...
+    @staticmethod
+    def _tasks_fit_on_node(node_config, tasks) -> bool: ...
 ```
 
-**Planned implementations:**
-| Class | Backend | Description |
-|---|---|---|
-| `CondorWorkQueue(PythonBackend)` | `htcondor` Python bindings | Direct schedd query via `htcondor.Schedd().query()` |
-| `CondorWorkQueue(SubprocessBackend)` | `subprocess` calling `condor_q` | Parse CLI output when bindings aren't available |
-| `CondorWorkQueue(RESTAPIBackend)` | HTCondor REST API | HTTP client for HTCondor's REST API endpoint |
+### `HighThroughputPlanner(PlacementStrategy)`
 
-### `SchedulerBackend` (abstract)
+Current behavior. `plan()` and `plan_for_tasks()` handle both no-configs and with-configs paths. With-configs uses first-fit-decreasing bin-packing. No walltime logic.
 
-Manages worker jobs on the execution platform. Subclasses implement: submit, cancel, list active jobs, signal, name.
+### `RuntimePackingPlanner(PlacementStrategy)`
+
+New behavior. Same bin-packing but adjusts node count for walltime and sets `Placement.walltime`.
+
+Additional constructor params: `max_walltime_minutes: float = 1440`, `runtime_buffer: float = 0.1`
+
+Walltime algorithm per node type:
+```
+max_runtime = max(task.runtime_minutes for task in tasks if set, default=max_walltime_minutes)
+tasks_per_node = fit_per_node from bin-packing
+total_batches = ceil(tasks_on_type / tasks_per_node)
+raw_walltime = total_batches * max_runtime * (1 + buffer)
+
+if raw_walltime <= max_walltime:
+    nodes = bin_packing_result
+    walltime = raw_walltime
+else:
+    nodes = ceil(raw_walltime / max_walltime)  # need more nodes
+    batches_per_node = ceil(total_batches / nodes)
+    walltime = batches_per_node * max_runtime * (1 + buffer)
+```
+
+Formatted as `HH:MM:SS` via `_format_walltime(minutes)`.
+
+### Backward Compatibility
 
 ```python
-class SchedulerBackend(ABC):
-    @abstractmethod
-    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str: ...
-    @abstractmethod
-    def cancel(self, job_id: str) -> None: ...
-    @abstractmethod
-    def list_active(self) -> list[JobInfo]: ...
-    @abstractmethod
-    def signal(self, job_id: str, sig: str) -> None: ...
-    @abstractmethod
-    def name(self) -> str: ...
+# In placement.py:
+PlacementPlanner = HighThroughputPlanner  # alias for backward compat
 ```
 
-**Implemented backends:**
-| Class | Mechanism | Description |
-|---|---|---|
-| `SlurmSubprocessBackend(SchedulerBackend)` | `sbatch`/`scancel`/`squeue` | Standard CLI interface |
-| `SlurmRESTAPIBackend(SchedulerBackend)` | Slurm REST API v0.0.38+ | HTTP-based job management |
-| `SlurmSFAPIBackend(SchedulerBackend)` | NERSC SFAPI | Perlmutter (NERSC) |
-| `PBSSubprocessBackend(SchedulerBackend)` | `qsub`/`qdel`/`qstat` | PBS/Torque CLI |
-| `LocalSubprocessBackend(SchedulerBackend)` | `Popen`/`kill` | Run workers as local processes (testing) |
-| `HTCondorRESTAPIBackend(SchedulerBackend)` | HTCondor REST API | HTCondor as scheduler |
+All existing code using `PlacementPlanner(...)` continues to work unchanged.
 
-A `SchedulerWrapper(SchedulerBackend)` provides simple delegation for logging and indirection without changing the backend interface.
-
-### `PoolManager`
-
-The core coordinator. Composes a `WorkQueue` + `SchedulerBackend`.
+### Factory Function
 
 ```python
-class PoolManager:
-    def __init__(self, config: Config, work_queue: WorkQueue,
-                 scheduler: SchedulerBackend): ...
-
-    def run(self): ...         # main loop
-    def _tick(self): ...       # poll + reconcile + scale
-    def _scale(self): ...      # scale decision
-    def _drain(self): ...      # graceful drain protocol
+def make_placement_strategy(
+    strategy: str,
+    node_configs=None,
+    task_resources=None,
+    batch_size=1,
+    max_workers=16,
+    min_workers=0,
+    max_walltime_minutes=1440,
+    runtime_buffer=0.1,
+) -> PlacementStrategy:
+    if strategy == "runtime-packing":
+        return RuntimePackingPlanner(...)
+    return HighThroughputPlanner(...)
 ```
 
-## Architecture Diagram
+## Dataclass Changes
 
-```
-┌────────────────────────┐      ┌───────────────────────────┐
-│   HTCondor Schedd      │      │   HPC Cluster             │
-│                        │      │                           │
-│  ┌──────────────────┐  │      │  pool-manager             │
-│  │ CondorWorkQueue   │◄─┼──────┼──► (PoolManager)          │
-│  │  .count_idle()    │  │      │   │                       │
-│  └──────────────────┘  │      │   │ .submit/.cancel        │
-│                        │      │   ▼                       │
-│  ◄── condor jobs ──────┼──────┼─── Worker Job             │
-│                        │      │    └── htcondor_worker.sh  │
-│                        │      │         └── condor daemon  │
-│                        │      │              ◄──► schedd   │
-│                        │      └───────────────────────────┘
-```
+### `TaskResources` (line 10-14)
 
-## Pluggable Backend Pattern (Strategy)
+Add `runtime_minutes: float = 0` (0 = unknown, treat as max_walltime)
 
-Each concrete class uses a *strategy* pattern internally:
+### `Placement` (line 17-21)
 
-```python
-class CondorWorkQueue(WorkQueue):
-    def __init__(self, backend: CondorBackend):
-        self._backend = backend
+Add `walltime: str | None = None` (e.g., `"23:50:00"` for Slurm `-t`)
 
-    def count_idle(self) -> int:
-        return self._backend.count_idle()
+## Config Changes
 
-class CondorBackend(ABC):
-    @abstractmethod
-    def count_idle(self) -> int: ...
+### `ScalingPolicy` (scaling.py)
 
-class CondorPythonBackend(CondorBackend): ...
-class CondorSubprocessBackend(CondorBackend): ...
-class CondorRESTAPIBackend(CondorBackend): ...
-```
+Add fields:
+- `strategy: str = "high-throughput"` (options: `"high-throughput"`, `"runtime-packing"`)
+- `max_walltime_minutes: float = 1440`
+- `runtime_buffer: float = 0.1`
 
-Same delegation pattern for `SchedulerWrapper` → backend:
+Update `placement_planner` property to pass new fields.
 
-```python
-class SchedulerWrapper(SchedulerBackend):
-    def __init__(self, backend: SchedulerBackend):
-        self._backend = backend
-    def submit(self, script_path, submit_args):
-        return self._backend.submit(script_path, submit_args)
-    # ... delegates cancel, list_active, signal, name
+### `Config.from_file()` (config.py)
 
-class SchedulerBackend(ABC):
-    @abstractmethod
-    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str: ...
-    @abstractmethod
-    def cancel(self, job_id: str) -> None: ...
-    @abstractmethod
-    def list_active(self) -> list[JobInfo]: ...
-    @abstractmethod
-    def signal(self, job_id: str, sig: str) -> None: ...
-    @abstractmethod
-    def name(self) -> str: ...
+Parse `strategy`, `max_walltime_minutes`, `runtime_buffer` from `scaling` YAML section.
 
-class SlurmSubprocessBackend(SchedulerBackend): ...
-class SlurmRESTAPIBackend(SchedulerBackend): ...
-class SlurmSFAPIBackend(SchedulerBackend): ...
-class PBSSubprocessBackend(SchedulerBackend): ...
-class LocalSubprocessBackend(SchedulerBackend): ...
-class HTCondorRESTAPIBackend(SchedulerBackend): ...
-```
-
-## Pool Manager Config (`pool-manager.yaml`)
+### YAML Example
 
 ```yaml
-poll_interval: 15            # seconds between work queue polls
-min_workers: 0
-max_workers: 16
-batch_size: 1                # queue items per worker
-scale_up_cooldown: 30        # seconds between submitting new jobs
-scale_down_cooldown: 60      # seconds before starting to drain
-drain_timeout: 120           # seconds to wait for graceful shutdown
-
-work_queue:
-  backend: condor_python     # condor_python | condor_subprocess | condor_rest
-  # Backend-specific options (e.g. schedd_name, constraint, rest_url, token)
-
-scheduler:
-  backend: slurm_subprocess  # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess | local_subprocess | htcondor_rest
-  worker_script: /path/to/htcondor_worker.sh
-  submit_args:
-    partition: defq
-    account: myproject
-    time: "08:00:00"
-    nodes: 1
-    ntasks: 1
-    # any key-value pair becomes --key=value or -K value
+scaling:
+  strategy: runtime-packing
+  max_walltime_minutes: 1440
+  runtime_buffer: 0.1
+  min_workers: 0
+  max_workers: 10
 ```
 
-## File Layout
+## Manager Changes (manager.py)
 
-```
-pool-manager/
-├── pool_manager/
-│   ├── __init__.py
-│   ├── __main__.py          # entry point
-│   ├── config.py            # config loading (pydantic/dataclass)
-│   ├── log.py               # logging setup
-│   ├── manager.py           # PoolManager — main loop
-│   ├── placement.py         # PlacementPlanner — node-aware bin-packing
-│   ├── scaling.py           # ScalingPolicy (config object + decision logic)
-│   ├── work_queue/
-│   │   ├── __init__.py
-│   │   ├── base.py          # WorkQueue ABC, CondorBackend ABC
-│   │   ├── condor.py        # CondorWorkQueue
-│   │   ├── condor_python.py
-│   │   ├── condor_subprocess.py
-│   │   └── condor_rest.py
-│   └── scheduler/
-│       ├── __init__.py
-│       ├── base.py          # SchedulerBackend ABC, JobState, JobInfo, NodeConfig
-│       ├── wrapper.py       # SchedulerWrapper (delegation wrapper)
-│       ├── slurm_subprocess.py
-│       ├── slurm_rest.py
-│       ├── slurm_sfapi.py
-│       ├── pbs_subprocess.py
-│       ├── local_subprocess.py
-│       └── htcondor_rest.py
-├── pool-manager.yaml        # config file
-├── pool-manager.service     # systemd unit
-├── README.md
-├── PLAN.md
-└── AGENTS.md
+### `PoolManager.__init__` (line 116-124)
+
+- Use `make_placement_strategy()` factory instead of direct `PlacementPlanner()` construction
+- Validate: if `strategy == "runtime-packing"` and no `node_configs`, log warning and fall back to `high-throughput`
+
+### `_start_workers_from_plan()` (line 409-445)
+
+- After building `args` dict, if `p.walltime` is set, inject `args["time"] = p.walltime`
+- This overrides any `time` in `submit_args` from config
+
+### `run()` (line 143-188)
+
+- Log strategy name on startup
+
+## HTCondor Backend Changes
+
+### All three backends (`condor_python.py`, `condor_subprocess.py`, `condor_rest.py`)
+
+- Add `"RuntimeMinutes"` to HTCondor projection
+- Parse into `TaskResources.runtime_minutes`
+
+Example (condor_python.py line 34-39):
+```python
+tasks.append(TaskResources(
+    cpus=float(job.get("requestcpus", 1)),
+    memory_mb=int(job.get("requestmemory", 1024)),
+    gpus=int(job.get("requestgpus", 0)),
+    runtime_minutes=float(job.get("runtimeminutes", 0)),
+))
 ```
 
-## Implementation Plan (TODOs)
+## CLI Changes (`__main__.py`)
 
-- [x] **1. Set up project structure**
-  - Directory layout, `__init__.py` files, `pyproject.toml` / `setup.py`
-  - Dev dependencies: `pytest`, `mypy`, `ruff`
+### `_run_test_strategy()`
 
-- [x] **2. Implement `WorkQueue` + `CondorBackend` hierarchy**
-  - `WorkQueue` ABC with `list_idle()`
-  - `CondorWorkQueue` — orchestrates backend
-  - `CondorPythonBackend` — `htcondor` bindings
-  - `CondorSubprocessBackend` — `subprocess.run(["condor_q", ...])`
-  - `CondorRESTAPIBackend` — HTTP client for HTCondor REST API
+- Parse `runtime_minutes` from JSON classads
+- Show walltime in placement plan output when strategy is `runtime-packing`
+- Add `--max-walltime` and `--runtime-buffer` CLI overrides
 
-- [x] **3. Implement `SchedulerBackend` hierarchy**
-  - `SchedulerBackend` ABC with `submit()`, `cancel()`, `list_active()`, `signal()`, `name()`
-  - `SlurmSubprocessBackend` — `sbatch`/`scancel`/`squeue`/`scancel --signal`
-  - `SlurmRESTAPIBackend` — HTTP client for Slurm REST API
-  - `SlurmSFAPIBackend` — NERSC SFAPI for Perlmutter
-  - `PBSSubprocessBackend` — `qsub`/`qdel`/`qstat`
-  - `LocalSubprocessBackend` — local `Popen` for testing
-  - `HTCondorRESTAPIBackend` — HTCondor REST API
-  - `SchedulerWrapper` — delegation wrapper
+## Files to Modify
 
-- [x] **4. Implement config loading (`Config`)**
-  - YAML → validated dataclass/Pydantic model
-  - Select backend classes by string name
-  - `node_configs`, `task_resources` for placement
+| File | Changes |
+|------|---------|
+| `pool_manager/placement.py` | ABC extraction, `HighThroughputPlanner`, `RuntimePackingPlanner`, `make_placement_strategy()`, `PlacementPlanner` alias |
+| `pool_manager/scaling.py` | New fields on `ScalingPolicy`, updated `placement_planner` property |
+| `pool_manager/config.py` | Parse new YAML fields |
+| `pool_manager/manager.py` | Use factory, inject walltime in submit args, log strategy |
+| `pool_manager/__main__.py` | Parse runtime_minutes, show walltime, CLI overrides |
+| `pool_manager/work_queue/condor_python.py` | Add RuntimeMinutes to projection, parse it |
+| `pool_manager/work_queue/condor_subprocess.py` | Same |
+| `pool_manager/work_queue/condor_rest.py` | Same |
+| `tests/test_placement.py` | Update imports, add RuntimePacking tests |
+| `tests/test_manager_placement.py` | Add runtime-packing manager tests |
 
-- [x] **5. Implement `PoolManager` core loop**
-  - Poll work queue → compute target pool size
-  - Scale up: submit new scheduler jobs
-  - Scale down: start graceful drain of excess workers
-  - Track job states (submitted, running, draining, exited, lost)
-  - Cooldown timers, hysteresis
-  - Node-aware placement via `PlacementPlanner`
+## Test Plan
 
-- [x] **6. Implement graceful drain protocol**
-  - SIGTERM excess/idle workers
-  - Wait `drain_timeout`, then `cancel` remaining
-  - Abort drain if new work arrives
-  - Signal handling on daemon itself (SIGINT/SIGTERM → drain all then exit)
+### Existing Tests
 
-- [x] **7. Error handling and recovery**
-  - Daemon restart: reconcile via `list_active()`
-  - Queue connection failures: backoff, preserve pool
-  - Scheduler failures: retry, log, don't crash
-  - Stale jobs: periodic `list_active()` reconciliation
+All existing `PlacementPlanner` references in tests continue to work via the backward-compat alias. No changes needed to existing test logic.
 
-- [x] **8. Configuration file and documentation**
-  - `pool-manager.yaml` with all options documented
-  - Systemd service file
-  - README with setup, test procedure, and examples
+### New Tests (`tests/test_placement.py`)
+
+**`TestRuntimePackingPlan`**:
+- `test_single_node_within_walltime`: 1000 tasks × 5 min, 8/node → 1 node, ~11.5h walltime
+- `test_walltime_exceeds_max_needs_more_nodes`: Long tasks → 2+ nodes
+- `test_tasks_without_runtime_uses_max`: Missing runtime → conservative walltime
+- `test_mixed_runtimes_uses_max`: Heterogeneous → max runtime used
+- `test_walltime_format_hhmmss`: Verify formatting
+- `test_zero_tasks`: Empty → no placements
+- `test_min_workers_respected`: Respects min_workers
+- `test_max_workers_cap`: Can't exceed max_workers
+
+**`TestRuntimePackingPlanForTasks`**:
+- `test_plan_for_tasks_sets_walltime`: Verify Placement.walltime is set
+- `test_plan_for_tasks_heterogeneous`: Mixed task sizes with walltime
+
+**`TestMakePlacementStrategy`**:
+- `test_high_throughput`: Returns HighThroughputPlanner
+- `test_runtime_packing`: Returns RuntimePackingPlanner
+- `test_unknown_strategy_raises`: ValueError
+
+### Manager Integration Tests (`tests/test_manager_placement.py`)
+
+- `test_start_workers_injects_walltime`: Verify `-t` is set from Placement.walltime
+- `test_tick_runtime_packing`: End-to-end tick
+
+## Verification
+
+1. `pytest tests/` — all existing tests pass (backward compat)
+2. `pytest tests/test_placement.py::TestRuntimePacking -v` — new tests pass
+3. `python -m pool_manager test-strategy examples/tasks_w_runtime.json` — shows walltime

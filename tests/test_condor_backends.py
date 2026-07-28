@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from pool_manager.placement import TaskResources
 from pool_manager.scheduler.htcondor_rest import CondorRestClient, HTCondorRESTAPIBackend
+from pool_manager.work_queue.base import WorkerSlotStatus
 from pool_manager.work_queue.condor_rest import CondorRESTAPIBackend
 from pool_manager.work_queue.condor_subprocess import CondorSubprocessBackend
 
@@ -113,6 +114,50 @@ class TestCondorSubprocessBackend:
         backend = CondorSubprocessBackend(schedd_name="schedd.example.com")
         assert "schedd.example.com" in backend.name()
 
+    def test_list_worker_status_empty(self):
+        backend = CondorSubprocessBackend()
+        with patch("pool_manager.work_queue.condor_subprocess.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = _mock_json_jobs([])
+            mock_run.return_value.stderr = ""
+            statuses = backend.list_worker_status()
+            assert statuses == []
+
+    def test_list_worker_status_parses(self):
+        backend = CondorSubprocessBackend()
+        mock_slots = [
+            {"Name": "slot1@host", "Owner": "12345.0", "State": "Busy"},
+            {"Name": "slot2@host", "Owner": "12345.1", "State": "Idle"},
+        ]
+        with patch("pool_manager.work_queue.condor_subprocess.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = _mock_json_jobs(mock_slots)
+            mock_run.return_value.stderr = ""
+            statuses = backend.list_worker_status()
+            assert len(statuses) == 2
+            assert statuses[0] == WorkerSlotStatus(
+                slot_name="slot1@host", owner_job_id="12345.0", state="Busy"
+            )
+            assert statuses[1] == WorkerSlotStatus(
+                slot_name="slot2@host", owner_job_id="12345.1", state="Idle"
+            )
+
+    def test_list_worker_status_nonzero_exit(self):
+        backend = CondorSubprocessBackend()
+        with patch("pool_manager.work_queue.condor_subprocess.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stdout = ""
+            mock_run.return_value.stderr = "error"
+            assert backend.list_worker_status() == []
+
+    def test_list_worker_status_invalid_json(self):
+        backend = CondorSubprocessBackend()
+        with patch("pool_manager.work_queue.condor_subprocess.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "not json"
+            mock_run.return_value.stderr = ""
+            assert backend.list_worker_status() == []
+
 
 class TestCondorRESTAPIBackend:
     def test_count_idle(self):
@@ -167,6 +212,35 @@ class TestCondorRESTAPIBackend:
     def test_name(self):
         backend = CondorRESTAPIBackend(url="http://htcondor:8080")
         assert "htcondor:8080" in backend.name()
+
+    def test_list_worker_status_empty(self):
+        backend = CondorRESTAPIBackend(url="http://htcondor:8080")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": []}
+        with patch("httpx.get", return_value=mock_response):
+            statuses = backend.list_worker_status()
+            assert statuses == []
+
+    def test_list_worker_status_parses(self):
+        backend = CondorRESTAPIBackend(url="http://htcondor:8080")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"Name": "slot1@host", "Owner": "12345.0", "State": "Busy"},
+                {"Name": "slot2@host", "Owner": None, "State": "Idle"},
+            ]
+        }
+        with patch("httpx.get", return_value=mock_response):
+            statuses = backend.list_worker_status()
+            assert len(statuses) == 2
+            assert statuses[0] == WorkerSlotStatus(
+                slot_name="slot1@host", owner_job_id="12345.0", state="Busy"
+            )
+            assert statuses[1] == WorkerSlotStatus(
+                slot_name="slot2@host", owner_job_id=None, state="Idle"
+            )
 
 
 class TestHTCondorRESTAPISchedulerBackend:

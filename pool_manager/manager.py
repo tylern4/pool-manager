@@ -20,7 +20,11 @@ from pool_manager.metrics import (
     start_metrics_server,
     update_metrics,
 )
-from pool_manager.placement import Placement, PlacementPlanner, TaskResources
+from pool_manager.placement import (
+    Placement,
+    TaskResources,
+    make_placement_strategy,
+)
 from pool_manager.scheduler import (
     HTCondorRESTAPIBackend,
     LocalSubprocessBackend,
@@ -114,12 +118,15 @@ class PoolManager:
         self._policy = config.scaling
 
         nc = config.scheduler.node_configs
-        self._planner = PlacementPlanner(
+        self._planner = make_placement_strategy(
+            strategy=self._policy.strategy,
             node_configs=nc if nc else None,
             task_resources=self._policy.task_resources,
             batch_size=self._policy.batch_size,
             max_workers=self._policy.max_workers,
             min_workers=self._policy.min_workers,
+            max_walltime_minutes=self._policy.max_walltime_minutes,
+            runtime_buffer=self._policy.runtime_buffer,
         )
         self._has_node_configs = bool(nc)
 
@@ -142,7 +149,10 @@ class PoolManager:
 
     def run(self):
         logger.info(
-            "Pool manager started (queue={}, scheduler={})", self._wq.name(), self._sched.name()
+            "Pool manager started (queue={}, scheduler={}, strategy={})",
+            self._wq.name(),
+            self._sched.name(),
+            self._policy.strategy,
         )
         logger.info(
             "Scaling policy: min={} max={} batch={} cooldown_up={} cooldown_down={}",
@@ -156,6 +166,12 @@ class PoolManager:
             logger.info(
                 "Node-aware placement: {} node config(s), resources from condor_q per task",
                 len(self._config.scheduler.node_configs),
+            )
+        if self._policy.strategy == "runtime-packing":
+            logger.info(
+                "Runtime packing: max_walltime={}min buffer={}",
+                self._policy.max_walltime_minutes,
+                self._policy.runtime_buffer,
             )
 
         if self._config.metrics_port > 0:
@@ -193,16 +209,18 @@ class PoolManager:
         start_time = time_mod.monotonic()
         try:
             tasks = self._wq.list_idle()
-            plan = self._planner.plan_for_tasks(tasks)
+            existing = self._build_existing_workers()
+            plan = self._planner.plan_for_tasks(tasks, existing=existing)
             self._last_plan = plan
             target = sum(p.count for p in plan)
             target = max(self._policy.min_workers, min(self._policy.max_workers, target))
             logger.debug(
-                "Tick: idle={} target={} active={} draining={}",
+                "Tick: idle={} target={} active={} draining={} existing_capacity={}",
                 len(tasks),
                 target,
                 self._active_count(),
                 self._draining_count(),
+                len(existing),
             )
 
             self._reconcile()
@@ -219,6 +237,19 @@ class PoolManager:
         finally:
             duration = time_mod.monotonic() - start_time
             TICK_DURATION.observe(duration)
+
+    def _build_existing_workers(self) -> list[tuple[str, float]]:
+        existing: list[tuple[str, float]] = []
+        for jid, ji in self._tracked.items():
+            if ji.state not in (JobState.RUNNING, JobState.PENDING):
+                continue
+            node_name = self._node_assignments.get(jid, "default")
+            if ji.state == JobState.RUNNING and ji.remaining_minutes is not None:
+                remaining = ji.remaining_minutes
+            else:
+                remaining = self._policy.max_walltime_minutes
+            existing.append((node_name, remaining))
+        return existing
 
     def _recover_state(self):
         active = self._sched.list_active()
@@ -328,7 +359,13 @@ class PoolManager:
                 existing = existing_per_type.get(p.node_config.name, 0)
                 needed = max(0, p.count - existing)
                 if needed > 0:
-                    adjusted_plan.append(Placement(node_config=p.node_config, count=needed))
+                    adjusted_plan.append(
+                        Placement(
+                            node_config=p.node_config,
+                            count=needed,
+                            walltime=p.walltime,
+                        )
+                    )
                     total_needed += needed
 
             if total_needed > 0:
@@ -337,21 +374,30 @@ class PoolManager:
             self._start_workers_simple(count)
 
     def _signal_workers(self, count: int, plan: list[Placement] | None = None):
-        active = sorted(
-            jid
-            for jid, ji in self._tracked.items()
-            if ji.state in (JobState.RUNNING, JobState.PENDING)
-        )
-        if count <= 0 or not active:
+        if count <= 0:
             return
 
+        # Query condor_status to find which worker jobs have active condor tasks
+        active_tasks_by_job: set[str] = set()
+        try:
+            slot_statuses = self._wq.list_worker_status()
+            for slot in slot_statuses:
+                if slot.owner_job_id and slot.state.lower() not in ("idle",):
+                    active_tasks_by_job.add(slot.owner_job_id)
+        except Exception:
+            logger.debug("Failed to query worker slot status, proceeding without task awareness")
+
+        pending = sorted(jid for jid, ji in self._tracked.items() if ji.state == JobState.PENDING)
+        running = sorted(jid for jid, ji in self._tracked.items() if ji.state == JobState.RUNNING)
+
+        # If plan provided, narrow running candidates to excess per node type
         if self._has_node_configs and plan is not None:
             desired: dict[str, int] = {}
             for p in plan:
                 desired[p.node_config.name] = desired.get(p.node_config.name, 0) + p.count
 
             by_type: dict[str, list[str]] = {}
-            for jid in active:
+            for jid in running:
                 nt = self._node_assignments.get(jid, "unknown")
                 by_type.setdefault(nt, []).append(jid)
 
@@ -370,18 +416,41 @@ class PoolManager:
                 key=lambda jid: node_costs.get(self._node_assignments.get(jid, ""), 0),
                 reverse=True,
             )
+            running = candidates
 
-            to_drain = candidates[:count]
-        else:
-            to_drain = active[:count]
+        # Priority 1: cancel pending jobs (no task running)
+        to_cancel: list[str] = []
+        for jid in pending:
+            if len(to_cancel) >= count:
+                break
+            to_cancel.append(jid)
 
-        for jid in to_drain:
-            logger.info("Signalling worker {} to drain (SIGTERM)", jid)
-            try:
-                self._sched.signal(jid, "SIGTERM")
-                self._tracked[jid] = JobInfo(job_id=jid, state=JobState.DRAINING)
-            except Exception:
-                logger.exception("Failed to signal worker {}", jid)
+        # Priority 2: cancel running jobs with no active condor tasks
+        if len(to_cancel) < count:
+            for jid in running:
+                if len(to_cancel) >= count:
+                    break
+                if jid not in active_tasks_by_job:
+                    to_cancel.append(jid)
+
+        for jid in to_cancel:
+            ji = self._tracked.get(jid)
+            if ji is None:
+                continue
+            if ji.state == JobState.PENDING:
+                logger.info("Cancelling pending worker {} (no task running)", jid)
+                try:
+                    self._sched.cancel(jid)
+                    self._tracked[jid] = JobInfo(job_id=jid, state=JobState.EXITED)
+                except Exception:
+                    logger.exception("Failed to cancel pending worker {}", jid)
+            else:
+                logger.info("Signalling worker {} to drain (SIGTERM, no active tasks)", jid)
+                try:
+                    self._sched.signal(jid, "SIGTERM")
+                    self._tracked[jid] = JobInfo(job_id=jid, state=JobState.DRAINING)
+                except Exception:
+                    logger.exception("Failed to signal worker {}", jid)
 
     def _start_workers_simple(self, count: int):
         script = self._config.scheduler.worker_script
@@ -431,6 +500,8 @@ class PoolManager:
             args["mem"] = f"{nc.memory_mb}M"
             if nc.gpus > 0:
                 args["gpus"] = str(nc.gpus)
+            if p.walltime:
+                args["time"] = p.walltime
             for _ in range(batch):
                 try:
                     job_id = self._sched.submit(script, args)

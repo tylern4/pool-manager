@@ -68,6 +68,8 @@ class Config:
                 cpus=int(n.get("cpus", 1)),
                 memory_mb=int(n.get("memory_mb", n.get("memory_gb", 1.024) * 1000)),
                 gpus=int(n.get("gpus", 0)),
+                max_walltime_minutes=n.get("max_walltime_minutes"),
+                max_nodes=n.get("max_nodes"),
                 submit_args=n.get("submit_args"),
             )
             for n in node_configs_raw
@@ -109,5 +111,8 @@ class Config:
                 scale_down_cooldown=sc.get("scale_down_cooldown", 60.0),
                 drain_timeout=sc.get("drain_timeout", 120.0),
                 drain_on_stop=sc.get("drain_on_stop", False),
+                strategy=sc.get("strategy", "high-throughput"),
+                max_walltime_minutes=sc.get("max_walltime_minutes", 1440),
+                runtime_buffer=sc.get("runtime_buffer", 0.1),
             ),
         )

@@ -1,0 +1,51 @@
+# Pool Manager Configuration — High-Throughput Strategy
+#
+# Strategy: scale out to match idle task count.
+# Each task gets its own worker node (or batch of tasks per node).
+# Minimizes wait time per task but uses more nodes.
+#
+# Example: 1000 tasks × 32 cores → 125 nodes × 256 cores each
+
+poll_interval: 15
+log_level: INFO
+log_mode: stdout
+metrics_port: 9090
+
+scaling:
+  strategy: high-throughput
+  min_workers: 0
+  max_workers: 100
+  batch_size: 8            # tasks per worker node
+  scale_up_cooldown: 30
+  scale_down_cooldown: 60
+  drain_timeout: 120
+
+work_queue:
+  backend: condor_python
+  schedd_name: ""
+  constraint: ""
+
+scheduler:
+  backend: slurm_subprocess
+  worker_script: /path/to/htcondor_worker.sh
+  node_configs:
+    - name: regular
+      cpus: 256
+      memory_gb: 500
+      gpus: 0
+      max_walltime_minutes: 2880  # 48 hours
+      # max_nodes: unlimited (omit for no limit)
+      submit_args:
+        queue: regular
+    - name: debug
+      cpus: 256
+      memory_gb: 500
+      gpus: 0
+      max_walltime_minutes: 30
+      max_nodes: 8
+      submit_args:
+        queue: debug
+  submit_args:
+    account: myproject
+    nodes: 1
+    ntasks: 1

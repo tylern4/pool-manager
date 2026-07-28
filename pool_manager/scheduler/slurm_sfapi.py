@@ -109,8 +109,25 @@ class SlurmSFAPIBackend(SchedulerBackend):
             if self._job_name_prefix and not (j.jobname or "").startswith(self._job_name_prefix):
                 continue
             state = _sfapi_to_jobstate(j.state)
-            if state in (JobState.RUNNING, JobState.PENDING):
-                result.append(JobInfo(job_id=str(j.jobid), state=state, job_name=j.jobname or ""))
+            if state not in (JobState.RUNNING, JobState.PENDING):
+                continue
+
+            remaining = None
+            if state == JobState.RUNNING:
+                elapsed = getattr(j, "elapsed", None)
+                time_limit = getattr(j, "timelimit", None)
+                if isinstance(elapsed, (int, float)) and isinstance(time_limit, (int, float)):
+                    if time_limit > 0:
+                        remaining = max(0.0, (time_limit - elapsed) / 60)
+
+            result.append(
+                JobInfo(
+                    job_id=str(j.jobid),
+                    state=state,
+                    job_name=j.jobname or "",
+                    remaining_minutes=remaining,
+                )
+            )
 
         logger.debug("Active jobs on {}: {}", self._machine, [j.job_id for j in result])
         return result

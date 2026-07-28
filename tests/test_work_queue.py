@@ -1,7 +1,7 @@
 from loguru import logger
 
 from pool_manager.placement import TaskResources
-from pool_manager.work_queue.base import CondorBackend, WorkQueue
+from pool_manager.work_queue.base import CondorBackend, WorkerSlotStatus, WorkQueue
 from pool_manager.work_queue.condor import CondorWorkQueue
 
 
@@ -17,6 +17,10 @@ class _FakeCondorBackend(CondorBackend):
     def list_idle(self, constraint: str = "") -> list[TaskResources]:
         self.called_with_constraint = constraint
         return [TaskResources() for _ in range(self._count)]
+
+    def list_worker_status(self, constraint: str = "") -> list[WorkerSlotStatus]:
+        self.called_with_constraint = constraint
+        return []
 
     def name(self) -> str:
         return "fake_backend"

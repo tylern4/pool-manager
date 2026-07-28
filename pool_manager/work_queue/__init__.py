@@ -1,4 +1,4 @@
-from pool_manager.work_queue.base import CondorBackend, WorkQueue
+from pool_manager.work_queue.base import CondorBackend, WorkerSlotStatus, WorkQueue
 from pool_manager.work_queue.condor import CondorWorkQueue
 from pool_manager.work_queue.condor_python import CondorPythonBackend
 from pool_manager.work_queue.condor_rest import CondorRESTAPIBackend
@@ -11,4 +11,5 @@ __all__ = [
     "CondorPythonBackend",
     "CondorSubprocessBackend",
     "CondorRESTAPIBackend",
+    "WorkerSlotStatus",
 ]

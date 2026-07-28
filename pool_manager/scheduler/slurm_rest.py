@@ -83,7 +83,7 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             params["user"] = self._user
         logger.debug("GET {} params={}", url, params)
         resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
-        logger.trace("list_active response: status={}", resp.status_code)
+        logger.trace("list_active response: {}", resp.status_code)
         resp.raise_for_status()
         data = resp.json()
 
@@ -95,7 +95,17 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             job_id = str(job.get("job_id", ""))
             state_str = job.get("state", "").upper()
             state = _parse_slurm_rest_state(state_str)
-            jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
+
+            remaining = None
+            if state == JobState.RUNNING:
+                elapsed = job.get("elapsed", 0)
+                time_limit = job.get("time_limit", 0)
+                if time_limit > 0:
+                    remaining = max(0.0, (time_limit - elapsed) / 60)
+
+            jobs.append(
+                JobInfo(job_id=job_id, state=state, job_name=job_name, remaining_minutes=remaining)
+            )
 
         logger.debug("Active Slurm jobs from REST: {}", [j.job_id for j in jobs])
         return jobs

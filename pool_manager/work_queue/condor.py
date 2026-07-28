@@ -1,7 +1,7 @@
 from loguru import logger
 
 from pool_manager.placement import TaskResources
-from pool_manager.work_queue.base import CondorBackend, WorkQueue
+from pool_manager.work_queue.base import CondorBackend, WorkerSlotStatus, WorkQueue
 
 
 class CondorWorkQueue(WorkQueue):
@@ -37,6 +37,11 @@ class CondorWorkQueue(WorkQueue):
         else:
             logger.debug("No idle tasks via {}", self._backend.name())
         return tasks
+
+    def list_worker_status(self) -> list[WorkerSlotStatus]:
+        statuses = self._backend.list_worker_status(constraint=self._constraint)
+        logger.debug("Worker slot status count={} via {}", len(statuses), self._backend.name())
+        return statuses
 
     def name(self) -> str:
         return self._backend.name()
