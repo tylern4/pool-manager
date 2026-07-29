@@ -104,33 +104,36 @@ class PlacementWidget(Static):
         self.refresh()
 
     def render(self) -> Text:
-        if not self.placements:
-            return Text.from_markup("[dim]No placements[/dim]")
-
         lines = [Text.from_markup("[bold]Placement Plan[/bold]")]
-        for name, count, cpus, mem, gpus in self.placements:
-            lines.append(
-                Text.from_markup(
-                    f"  {name}: [green]{count}[/green] nodes (cpus={cpus} mem={mem}MB gpus={gpus})"
+        if not self.placements:
+            lines.append(Text.from_markup("  [yellow]No placements needed[/yellow]"))
+        else:
+            for name, count, cpus, mem, gpus in self.placements:
+                lines.append(
+                    Text.from_markup(
+                        f"  {name}: [green]{count}[/green] nodes"
+                        f" (cpus={cpus} mem={mem}MB gpus={gpus})"
+                    )
                 )
-            )
         return Text("\n").join(lines)
 
 
 class PoolManagerTUI(App):
     CSS = """
-    Screen {
-        layout: grid;
-        grid-size: 2;
-        grid-columns: 1fr 1fr;
+    #main {
+        layout: horizontal;
+        height: 1fr;
     }
 
     .left-panel {
-        column-span: 1;
+        width: 1fr;
+        height: 1fr;
+        layout: vertical;
     }
 
     .right-panel {
-        column-span: 1;
+        width: 1fr;
+        height: 1fr;
     }
 
     PoolStateWidget {
@@ -143,6 +146,7 @@ class PoolManagerTUI(App):
         height: auto;
         padding: 1;
         border: solid blue;
+        min-height: 3;
     }
 
     WorkersTable {
@@ -188,11 +192,12 @@ class PoolManagerTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Container(classes="left-panel"):
-            yield PoolStateWidget()
-            yield PlacementWidget()
-        with Container(classes="right-panel"):
-            yield WorkersTable()
+        with Container(id="main"):
+            with Container(classes="left-panel"):
+                yield PoolStateWidget()
+                yield PlacementWidget()
+            with Container(classes="right-panel"):
+                yield WorkersTable()
         yield Footer()
 
     def on_mount(self) -> None:
