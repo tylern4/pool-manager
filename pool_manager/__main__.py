@@ -1,8 +1,8 @@
-import argparse
 import json
 import sys
 from pathlib import Path
 
+import typer
 from loguru import logger
 
 from pool_manager.config import Config
@@ -11,122 +11,101 @@ from pool_manager.manager import PoolManager, _make_scheduler, _make_work_queue
 from pool_manager.placement import PlacementPlanner, TaskResources
 from pool_manager.tui import run_tui
 
-
-def main():
-    parser = argparse.ArgumentParser(description="HTCondor → HPC scheduler pool manager")
-    subparsers = parser.add_subparsers(dest="command", help="Subcommand (default: run daemon)")
-
-    base_parser = argparse.ArgumentParser(add_help=False)
-    base_parser.add_argument(
-        "-c",
-        "--config",
-        default="pool-manager.yaml",
-        help="Path to config file (default: pool-manager.yaml)",
-    )
-    base_parser.add_argument(
-        "--log-level", default=None, help="Log level override (TRACE, DEBUG, INFO, WARNING)"
-    )
-
-    run_parser = subparsers.add_parser(
-        "run", parents=[base_parser], help="Run the pool manager daemon"
-    )
-    run_parser.set_defaults(command="run")
-
-    tui_parser = subparsers.add_parser("tui", parents=[base_parser], help="Run the TUI dashboard")
-    tui_parser.set_defaults(command="tui")
-
-    strategy_parser = subparsers.add_parser(
-        "test-strategy",
-        parents=[base_parser],
-        help="Test placement strategy with condor_q -json output",
-    )
-    strategy_parser.add_argument(
-        "json_file",
-        help="Path to JSON file containing condor_q -json output",
-    )
-    strategy_parser.add_argument(
-        "--running",
-        "-r",
-        type=int,
-        default=None,
-        help="Current number of running workers",
-    )
-    strategy_parser.add_argument(
-        "--running-type",
-        "-rt",
-        action="append",
-        default=[],
-        metavar="TYPE=COUNT",
-        help=("Current running count per node type (repeatable, e.g. -rt small=3 -rt large=2)"),
-    )
-
-    args = parser.parse_args()
-
-    if args.command is None:
-        args.command = "run"
-
-    if args.command == "run":
-        _run_daemon(args)
-    elif args.command == "tui":
-        _run_tui(args)
-    elif args.command == "test-strategy":
-        _run_test_strategy(args)
+app = typer.Typer(
+    name="pool-manager",
+    help="HTCondor → HPC scheduler pool manager",
+    no_args_is_help=True,
+)
 
 
-def _run_daemon(args):
-    config_path = getattr(args, "config", "pool-manager.yaml")
-    config = Config.from_file(Path(config_path))
+def _common_config(config: str, log_level: str | None) -> Config:
+    cfg = Config.from_file(Path(config))
+    level = log_level or cfg.log_level
+    setup_logging(level, log_mode=cfg.log_mode, log_file=cfg.log_file)
+    logger.info("Loading config from {}", config)
+    return cfg
 
-    level = getattr(args, "log_level", None) or config.log_level
-    setup_logging(level, log_mode=config.log_mode, log_file=config.log_file)
-    logger.info("Loading config from {}", config_path)
-    logger.debug(
-        "Config: poll_interval={} min={} max={} batch={} backend={} scheduler={}",
-        config.poll_interval,
-        config.scaling.min_workers,
-        config.scaling.max_workers,
-        config.scaling.batch_size,
-        config.work_queue.backend,
-        config.scheduler.backend,
-    )
 
+@app.command()
+def run(
+    config: str = typer.Option("pool-manager.yaml", "-c", "--config", help="Path to config file"),
+    log_level: str | None = typer.Option(
+        None, "--log-level", help="Log level override (TRACE, DEBUG, INFO, WARNING)"
+    ),
+):
+    cfg = _common_config(config, log_level)
     try:
-        wq = _make_work_queue(config)
-        sched = _make_scheduler(config)
+        wq = _make_work_queue(cfg)
+        sched = _make_scheduler(cfg)
     except ValueError as e:
         logger.error("Configuration error: {}", e)
         sys.exit(1)
 
-    pm = PoolManager(config=config, work_queue=wq, scheduler=sched)
+    pm = PoolManager(config=cfg, work_queue=wq, scheduler=sched)
     try:
         pm.run()
     except KeyboardInterrupt:
         logger.info("Interrupted")
 
 
-def _run_tui(args):
-    config_path = getattr(args, "config", "pool-manager.yaml")
-    run_tui(config_path)
+@app.command()
+def tui(
+    config: str = typer.Option("pool-manager.yaml", "-c", "--config", help="Path to config file"),
+    log_level: str | None = typer.Option(
+        None, "--log-level", help="Log level override (TRACE, DEBUG, INFO, WARNING)"
+    ),
+):
+    _common_config(config, log_level)
+    run_tui(config)
 
 
-def _run_test_strategy(args):
-    level = getattr(args, "log_level", None) or "WARNING"
-    setup_logging(level)
+def _parse_running_types(values: list[str]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for rt in values:
+        if "=" not in rt:
+            typer.echo(f"Error: --running-type must be TYPE=COUNT, got '{rt}'", err=True)
+            raise typer.Exit(1)
+        name, count_str = rt.split("=", 1)
+        try:
+            result[name] = int(count_str)
+        except ValueError:
+            typer.echo(f"Error: invalid count for --running-type '{rt}'", err=True)
+            raise typer.Exit(1)
+    return result
 
-    config_path = getattr(args, "config", "pool-manager.yaml")
-    config = Config.from_file(Path(config_path))
-    ncs = config.scheduler.node_configs
-    policy = config.scaling
 
-    json_path = Path(args.json_file)
-    if not json_path.exists():
-        print(f"Error: JSON file not found: {args.json_file}", file=sys.stderr)
-        sys.exit(1)
-    raw = json.loads(json_path.read_text())
+@app.command()
+def test_strategy(
+    json_file: Path = typer.Argument(
+        ..., help="Path to JSON file containing condor_q -json output"
+    ),
+    config: str = typer.Option("pool-manager.yaml", "-c", "--config", help="Path to config file"),
+    log_level: str | None = typer.Option(
+        None, "--log-level", help="Log level override (TRACE, DEBUG, INFO, WARNING)"
+    ),
+    running: int | None = typer.Option(
+        None, "-r", "--running", help="Current number of running workers"
+    ),
+    running_type: list[str] = typer.Option(
+        [],
+        "-rt",
+        "--running-type",
+        help="Current running count per node type (repeatable, e.g. -rt small=3 -rt large=2)",
+    ),
+):
+    _common_config(config, log_level)
+    cfg = Config.from_file(Path(config))
+    ncs = cfg.scheduler.node_configs
+    policy = cfg.scaling
+
+    if not json_file.exists():
+        typer.echo(f"Error: JSON file not found: {json_file}", err=True)
+        raise typer.Exit(1)
+    raw = json.loads(json_file.read_text())
 
     if not isinstance(raw, list):
-        print("Error: JSON file must contain a list of job classads", file=sys.stderr)
-        sys.exit(1)
+        typer.echo("Error: JSON file must contain a list of job classads", err=True)
+        raise typer.Exit(1)
 
     tasks = []
     for job in raw:
@@ -136,6 +115,7 @@ def _run_test_strategy(args):
                 cpus=float(job.get("requestcpus", 1)),
                 memory_mb=int(job.get("requestmemory", 1024)),
                 gpus=int(job.get("requestgpus", 0)),
+                runtime_minutes=int(job.get("runtime_minutes", 0)),
             )
         )
 
@@ -150,42 +130,31 @@ def _run_test_strategy(args):
     placements = planner.plan_for_tasks(tasks)
     target = planner.target_size(len(tasks))
 
-    running_total = args.running
-    running_per_type: dict[str, int] = {}
-    for rt in args.running_type:
-        if "=" not in rt:
-            print(f"Error: --running-type must be TYPE=COUNT, got '{rt}'", file=sys.stderr)
-            sys.exit(1)
-        name, count_str = rt.split("=", 1)
-        try:
-            running_per_type[name] = int(count_str)
-        except ValueError:
-            print(f"Error: invalid count for --running-type '{rt}'", file=sys.stderr)
-            sys.exit(1)
-
+    running_per_type = _parse_running_types(running_type)
+    running_total = running
     if running_total is None and running_per_type:
         running_total = sum(running_per_type.values())
 
-    print(f"Tasks: {len(tasks)}")
+    typer.echo(f"Tasks: {len(tasks)}")
     nc_list = ", ".join(n.name for n in ncs) if ncs else "none"
-    print(f"Node configs: {len(ncs)} ({nc_list})")
+    typer.echo(f"Node configs: {len(ncs)} ({nc_list})")
     target_info = ""
     if ncs:
         target_info = f" (max={policy.max_workers}, min={policy.min_workers})"
-    print(f"Target workers: {target}{target_info}")
+    typer.echo(f"Target workers: {target}{target_info}")
 
     if running_total is not None:
         delta = target - running_total
         if delta > 0:
-            print(f"Current workers: {running_total}  (add {delta})")
+            typer.echo(f"Current workers: {running_total}  (add {delta})")
         elif delta < 0:
-            print(f"Current workers: {running_total}  (remove {-delta})")
+            typer.echo(f"Current workers: {running_total}  (remove {-delta})")
         else:
-            print(f"Current workers: {running_total}  (no change)")
+            typer.echo(f"Current workers: {running_total}  (no change)")
 
     if running_per_type and placements:
-        print()
-        print("Per-type scaling:")
+        typer.echo("")
+        typer.echo("Per-type scaling:")
         desired_counts: dict[str, int] = {}
         for p in placements:
             desired_counts[p.node_config.name] = desired_counts.get(p.node_config.name, 0) + p.count
@@ -194,34 +163,38 @@ def _run_test_strategy(args):
             cur = running_per_type.get(t, 0)
             des = desired_counts.get(t, 0)
             if cur < des:
-                print(f"  {t}: {cur} -> {des}  (+{des - cur})")
+                typer.echo(f"  {t}: {cur} -> {des}  (+{des - cur})")
             elif cur > des:
-                print(f"  {t}: {cur} -> {des}  (-{cur - des})")
+                typer.echo(f"  {t}: {cur} -> {des}  (-{cur - des})")
             else:
-                print(f"  {t}: {cur} -> {des}  (no change)")
+                typer.echo(f"  {t}: {cur} -> {des}  (no change)")
 
-    print()
+    typer.echo("")
 
     if not placements:
-        print("No placement needed")
+        typer.echo("No placement needed")
         return
 
-    print("Placement plan:")
+    typer.echo("Placement plan:")
     total = 0
     for p in placements:
         nc = p.node_config
         detail = ""
         if ncs:
             detail = f" (cpus={nc.cpus} mem={nc.memory_mb}MB gpus={nc.gpus})"
-        print(f"  {nc.name} x {p.count}{detail}")
+        typer.echo(f"  {nc.name} x {p.count}{detail}")
         total += p.count
 
-    print(f"\nTotal nodes: {total}")
+    typer.echo(f"\nTotal nodes: {total}")
     if tasks:
-        print(f"Total tasks placed: {len(tasks)}", end="")
+        msg = f"Total tasks placed: {len(tasks)}"
         if total > 0:
-            print(f" ({len(tasks) // total} avg tasks/node)", end="")
-        print()
+            msg += f" ({len(tasks) // total} avg tasks/node)"
+        typer.echo(msg)
+
+
+def main():
+    app()
 
 
 if __name__ == "__main__":

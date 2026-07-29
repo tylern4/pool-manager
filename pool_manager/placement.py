@@ -12,6 +12,7 @@ class TaskResources:
     cpus: float = 1.0
     memory_mb: int = 1024
     gpus: int = 0
+    runtime_minutes: int = 0
 
 
 @dataclass
@@ -64,13 +65,17 @@ class PlacementPlanner:
         if idle_count <= 0:
             return self._min_plan()
 
+        t = self._task_resources
         configs = [
-            nc for nc in self._node_configs if (nc.gpus > 0) == (self._task_resources.gpus > 0)
+            nc
+            for nc in self._node_configs
+            if (nc.gpus > 0) == (t.gpus > 0)
+            and (nc.runtime_minutes == 0 or t.runtime_minutes <= nc.runtime_minutes)
         ] or self._node_configs
 
         sorted_configs = sorted(
             configs,
-            key=lambda n: n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1),
+            key=lambda n: (n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1), -n.runtime_minutes),
             reverse=True,
         )
 
@@ -173,7 +178,7 @@ class PlacementPlanner:
 
         sorted_configs = sorted(
             self._node_configs,
-            key=lambda n: n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1),
+            key=lambda n: (n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1), -n.runtime_minutes),
             reverse=True,
         )
 
@@ -250,6 +255,9 @@ class PlacementPlanner:
         if total_gpus > 0 and node_config.gpus <= 0:
             return False
         if total_gpus > node_config.gpus:
+            return False
+        max_runtime = max(t.runtime_minutes for t in tasks)
+        if node_config.runtime_minutes > 0 and max_runtime > node_config.runtime_minutes:
             return False
         return True
 
