@@ -29,6 +29,7 @@ class WorkerInfo:
 
 class PoolStateWidget(Static):
     idle_jobs = reactive(0)
+    running_jobs = reactive(0)
     active_count = reactive(0)
     draining_count = reactive(0)
     pending_count = reactive(0)
@@ -57,7 +58,8 @@ class PoolStateWidget(Static):
             Text.from_markup(f"  Work Queue: {self.work_queue_status}"),
             Text(),
             Text.from_markup("[bold]HTCondor Queue[/bold]"),
-            Text.from_markup(f"  Idle jobs: [yellow]{self.idle_jobs}[/yellow]"),
+            Text.from_markup(f"  Idle:    [yellow]{self.idle_jobs}[/yellow]"),
+            Text.from_markup(f"  Running: [green]{self.running_jobs}[/green]"),
             Text(),
             Text.from_markup("[bold]Workers[/bold]"),
             Text.from_markup(f"  Target:   [blue]{self.target_workers}[/blue]"),
@@ -200,19 +202,24 @@ class PoolManagerTUI(App):
     def _refresh(self) -> None:
         state_widget = self.query_one(PoolStateWidget)
 
-        idle_tasks: list[TaskResources] = []
+        all_tasks: list[TaskResources] = []
         if self._wq is not None:
             try:
-                idle_tasks = self._wq.list_idle()
+                all_tasks = self._wq.list_idle()
                 state_widget.work_queue_status = "[green]Connected[/green]"
-                state_widget.idle_jobs = len(idle_tasks)
+                idle_count = sum(1 for t in all_tasks if t.job_status == 1)
+                running_count = sum(1 for t in all_tasks if t.job_status == 2)
+                state_widget.idle_jobs = idle_count
+                state_widget.running_jobs = running_count
             except Exception as e:
                 msg = _format_error(e)
                 state_widget.work_queue_status = f"[red]{msg}[/red]"
                 state_widget.idle_jobs = 0
+                state_widget.running_jobs = 0
         else:
             state_widget.work_queue_status = "[dim]Not configured[/dim]"
             state_widget.idle_jobs = 0
+            state_widget.running_jobs = 0
 
         active_jobs: list[JobInfo] = []
         if self._sched is not None:
@@ -227,6 +234,7 @@ class PoolManagerTUI(App):
         else:
             state_widget.scheduler_status = "[dim]Not configured[/dim]"
 
+        idle_tasks = [t for t in all_tasks if t.job_status == 1]
         plan: list[Placement] = []
         target = 0
         if self._planner is not None:

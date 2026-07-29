@@ -28,7 +28,7 @@ class TestPoolStateWidget:
         assert widget.idle_jobs == 0
         assert widget.target_workers == 0
         assert widget.scale_action == ""
-        assert "Idle jobs: 0" in rendered
+        assert "Idle:    0" in rendered
         assert "Target:" in rendered
 
     def test_render_with_connection_errors(self):
