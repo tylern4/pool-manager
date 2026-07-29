@@ -51,11 +51,9 @@ def run(
 @app.command()
 def tui(
     config: str = typer.Option("pool-manager.yaml", "-c", "--config", help="Path to config file"),
-    log_level: str | None = typer.Option(
-        None, "--log-level", help="Log level override (TRACE, DEBUG, INFO, WARNING)"
-    ),
 ):
-    _common_config(config, log_level)
+    Config.from_file(Path(config))
+    logger.remove()
     run_tui(config)
 
 
