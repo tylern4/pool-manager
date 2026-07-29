@@ -48,7 +48,7 @@ class MetricsSnapshot:
     tasks_by_type: dict[str, int] | None = None
 
 
-def start_metrics_server(port: int, addr: str = "") -> None:
+def start_metrics_server(port: int, addr: str = "0.0.0.0") -> None:
     start_http_server(port, addr)
 
 
