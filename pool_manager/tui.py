@@ -97,22 +97,28 @@ class WorkersTable(DataTable):
 
 
 class PlacementWidget(Static):
-    placements: list[tuple[str, int, int, int, int]] = []
+    placements: list[tuple[str, int, int, int, int, int]] = []
 
-    def update_placements(self, placements: list[tuple[str, int, int, int, int]]) -> None:
+    def update_placements(self, placements: list[tuple[str, int, int, int, int, int]]) -> None:
         self.placements = placements
         self.refresh()
 
     def render(self) -> Text:
         lines = [Text.from_markup("[bold]Placement Plan[/bold]")]
         if not self.placements:
-            lines.append(Text.from_markup("  [yellow]No placements needed[/yellow]"))
+            lines.append(Text.from_markup("  [yellow]No change needed[/yellow]"))
         else:
-            for name, count, cpus, mem, gpus in self.placements:
+            for name, delta, cpus, mem, gpus, existing in self.placements:
+                if delta > 0:
+                    tag = f"[green]+{delta}[/green]"
+                elif delta < 0:
+                    tag = f"[red]{delta}[/red]"
+                else:
+                    tag = "[blue]0[/blue]"
                 lines.append(
                     Text.from_markup(
-                        f"  {name}: [green]{count}[/green] nodes"
-                        f" (cpus={cpus} mem={mem}MB gpus={gpus})"
+                        f"  {name}: {tag} nodes"
+                        f" ({existing} running, cpus={cpus} mem={mem}MB gpus={gpus})"
                     )
                 )
         return Text("\n").join(lines)
@@ -276,10 +282,22 @@ class PoolManagerTUI(App):
             node_type = parse_config_name(j.job_name, prefix)
             table.add_row(j.job_id, j.state.value, node_type)
 
-        placements_out: list[tuple[str, int, int, int, int]] = []
-        for p in plan:
-            nc = p.node_config
-            placements_out.append((nc.name, p.count, nc.cpus, nc.memory_mb, nc.gpus))
+        existing_per_type: dict[str, int] = {}
+        for j in active_jobs:
+            nt = parse_config_name(j.job_name, prefix)
+            existing_per_type[nt] = existing_per_type.get(nt, 0) + 1
+
+        all_types = set(existing_per_type.keys()) | {p.node_config.name for p in plan}
+        placements_out: list[tuple[str, int, int, int, int, int]] = []
+        for nt in sorted(all_types):
+            nc = next((p.node_config for p in plan if p.node_config.name == nt), None)
+            desired = next((p.count for p in plan if p.node_config.name == nt), 0)
+            existing = existing_per_type.get(nt, 0)
+            delta = desired - existing
+            if nc:
+                placements_out.append((nt, delta, nc.cpus, nc.memory_mb, nc.gpus, existing))
+            else:
+                placements_out.append((nt, delta, 0, 0, 0, existing))
         placement_widget = self.query_one(PlacementWidget)
         placement_widget.update_placements(placements_out)
 
