@@ -14,7 +14,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 from pool_manager.config import Config
 from pool_manager.manager import _make_scheduler, _make_work_queue
 from pool_manager.placement import Placement, PlacementPlanner, TaskResources
-from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, parse_config_name
 from pool_manager.work_queue.base import WorkQueue
 
 REFRESH_INTERVAL = 1.0
@@ -269,10 +269,12 @@ class PoolManagerTUI(App):
         else:
             state_widget.scale_action = "[blue]No change needed[/blue]"
 
+        prefix = self.config.scheduler.job_name_prefix
         table = self.query_one(WorkersTable)
         table.clear()
         for j in active_jobs:
-            table.add_row(j.job_id, j.state.value, "")
+            node_type = parse_config_name(j.job_name, prefix)
+            table.add_row(j.job_id, j.state.value, node_type)
 
         placements_out: list[tuple[str, int, int, int, int]] = []
         for p in plan:
