@@ -431,6 +431,9 @@ class PoolManager:
             args["mem"] = f"{nc.memory_mb}M"
             if nc.gpus > 0:
                 args["gpus"] = str(nc.gpus)
+            if nc.runtime_minutes > 0:
+                h, m = divmod(nc.runtime_minutes, 60)
+                args["time"] = f"{h:02d}:{m:02d}:00"
             for _ in range(batch):
                 try:
                     job_id = self._sched.submit(script, args)

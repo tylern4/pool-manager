@@ -31,16 +31,39 @@ scheduler:
   # When defined, the pool manager chooses the minimum number of nodes
   # to fit all idle tasks based on their resource requirements.
   node_configs:
-    - name: gpu
+    - name: debug_gpu
+      time_min: 30
+      queue: debug
       cpus: 128
       memory_gb: 256
       gpus: 4
+    - name: short_gpu
+      time_hrs: 12
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+    - name: gpu
+      time_hrs: 48
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+    - name: debug
+      time_min: 30
+      cpus: 256
+      memory_gb: 512
+      gpus: 0
+      queue: debug
+    - name: short
+      time_hrs: 12
+      cpus: 256
+      memory_gb: 512
+      gpus: 0
     - name: large
+      time_hrs: 48
       cpus: 256
       memory_gb: 512
       gpus: 0
   # These are passed as --key=value to sbatch (or -key value to qsub)
   submit_args:
     account: m342
-    time: "2-00:00:00"
     nodes: 1

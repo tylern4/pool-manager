@@ -475,3 +475,114 @@ class TestPlanEdgeCases:
         # GPU-only node is skipped for CPU tasks in plan_for_tasks (line 214)
         placements = p.plan_for_tasks(tasks)
         assert placements == []
+
+
+class TestPlanRuntimeAware:
+    def test_runtime_fits_within_node_limit(self):
+        nc = [NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=60)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024, runtime_minutes=30),
+        )
+        placements = p.plan(4)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "short"
+
+    def test_runtime_exceeds_node_limit_skips_config(self):
+        nc = [
+            NodeConfig(name="short", cpus=128, memory_mb=262144, runtime_minutes=30),
+            NodeConfig(name="long", cpus=128, memory_mb=262144, runtime_minutes=120),
+        ]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024, runtime_minutes=60),
+        )
+        placements = p.plan(4)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "long"
+
+    def test_runtime_no_limit_on_node_allows_any_task(self):
+        nc = [NodeConfig(name="unlimited", cpus=4, memory_mb=8192, runtime_minutes=0)]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024, runtime_minutes=999),
+        )
+        placements = p.plan(1)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "unlimited"
+
+    def test_plan_prefers_shorter_runtime_nodes_for_sorting(self):
+        nc = [
+            NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=30),
+            NodeConfig(name="long", cpus=4, memory_mb=8192, runtime_minutes=120),
+        ]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024, runtime_minutes=10),
+        )
+        placements = p.plan(2)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "short"
+
+    def test_tasks_fit_on_node_runtime_overflow(self):
+        nc = NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=30)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=60)]
+        assert not PlacementPlanner._tasks_fit_on_node(nc, tasks)
+
+    def test_tasks_fit_on_node_runtime_exact_fit(self):
+        nc = NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=60)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=60)]
+        assert PlacementPlanner._tasks_fit_on_node(nc, tasks)
+
+    def test_tasks_fit_on_node_runtime_mixed_tasks_max_wins(self):
+        nc = NodeConfig(name="short", cpus=8, memory_mb=16384, runtime_minutes=60)
+        tasks = [
+            TaskResources(cpus=1, memory_mb=1024, runtime_minutes=30),
+            TaskResources(cpus=1, memory_mb=1024, runtime_minutes=90),
+        ]
+        assert not PlacementPlanner._tasks_fit_on_node(nc, tasks)
+
+    def test_plan_for_tasks_runtime_exceeds_skips_node(self):
+        nc = [
+            NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=30),
+            NodeConfig(name="long", cpus=4, memory_mb=8192, runtime_minutes=120),
+        ]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=60)]
+        placements = p.plan_for_tasks(tasks)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "long"
+
+    def test_plan_for_tasks_runtime_fits_on_first_node(self):
+        nc = [
+            NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=60),
+            NodeConfig(name="long", cpus=4, memory_mb=8192, runtime_minutes=120),
+        ]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=30)]
+        placements = p.plan_for_tasks(tasks)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "short"
+
+    def test_plan_for_tasks_runtime_mixed_packing(self):
+        nc = [
+            NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=60),
+            NodeConfig(name="long", cpus=4, memory_mb=8192, runtime_minutes=120),
+        ]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [
+            TaskResources(cpus=1, memory_mb=1024, runtime_minutes=30),
+            TaskResources(cpus=1, memory_mb=1024, runtime_minutes=90),
+        ]
+        placements = p.plan_for_tasks(tasks)
+        assert len(placements) == 2
+        names = {pl.node_config.name for pl in placements}
+        assert names == {"short", "long"}
+
+    def test_plan_for_tasks_runtime_unplaceable(self):
+        nc = [NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=30)]
+        p = PlacementPlanner(node_configs=nc)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=60)]
+        logger.remove()
+        placements = p.plan_for_tasks(tasks)
+        assert placements == []

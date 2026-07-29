@@ -36,6 +36,7 @@ class CondorPythonBackend(CondorBackend):
                     cpus=float(job.get("requestcpus", 1)),
                     memory_mb=int(job.get("requestmemory", 1024)),
                     gpus=int(job.get("requestgpus", 0)),
+                    runtime_minutes=int(job.get("runtime_minutes", 0)),
                 )
             )
         logger.debug("HTCondor idle job count: {}", len(tasks))

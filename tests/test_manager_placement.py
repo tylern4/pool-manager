@@ -110,6 +110,20 @@ class TestManagerPlacement:
         _script, submit_args = call[0]
         assert submit_args["gpus"] == "4"
 
+    def test_start_workers_from_plan_injects_time_arg(
+        self, mock_scheduler, mock_work_queue, tmp_path
+    ):
+        script = tmp_path / "worker.sh"
+        script.write_text("#!/bin/bash\n")
+        ncs = [NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=90)]
+        cfg = make_config(node_configs=ncs, worker_script=str(script))
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        plan = mgr._planner.plan_for_tasks([TaskResources(cpus=1, memory_mb=1024)] * 2)
+        mgr._start_workers(plan, 1)
+        call = mock_scheduler.submit.call_args
+        _script, submit_args = call[0]
+        assert submit_args["time"] == "01:30:00"
+
     def test_tick_uses_target_from_planner(self, mock_scheduler, mock_work_queue, tmp_path):
         script = tmp_path / "worker.sh"
         script.write_text("#!/bin/bash\n")

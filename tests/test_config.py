@@ -28,6 +28,39 @@ class TestConfig:
         cfg = Config.from_file("/nonexistent/path.yaml")
         assert isinstance(cfg, Config)
 
+    def test_parses_node_config_time_hrs_min(self):
+        yaml_content = """
+scheduler:
+  node_configs:
+    - name: debug
+      time_min: 30
+      cpus: 4
+      memory_gb: 8
+    - name: short
+      time_hrs: 12
+      cpus: 4
+      memory_gb: 8
+    - name: long
+      time_hrs: 48
+      cpus: 4
+      memory_gb: 8
+"""
+        with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            cfg = Config.from_file(path)
+            ncs = cfg.scheduler.node_configs
+            assert len(ncs) == 3
+            assert ncs[0].name == "debug"
+            assert ncs[0].runtime_minutes == 30
+            assert ncs[1].name == "short"
+            assert ncs[1].runtime_minutes == 720
+            assert ncs[2].name == "long"
+            assert ncs[2].runtime_minutes == 2880
+        finally:
+            Path(path).unlink(missing_ok=True)
+
     def test_from_file_parses_values(self):
         yaml_content = """
 poll_interval: 30
