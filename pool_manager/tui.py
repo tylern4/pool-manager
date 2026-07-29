@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from loguru import logger
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container
@@ -12,10 +12,10 @@ from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, Static
 
 from pool_manager.config import Config
-from pool_manager.metrics import get_snapshot
-
-if TYPE_CHECKING:
-    pass
+from pool_manager.manager import _make_scheduler, _make_work_queue
+from pool_manager.placement import Placement, PlacementPlanner, TaskResources
+from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend
+from pool_manager.work_queue.base import WorkQueue
 
 REFRESH_INTERVAL = 1.0
 
@@ -29,26 +29,22 @@ class WorkerInfo:
 
 class PoolStateWidget(Static):
     idle_jobs = reactive(0)
-    active_workers = reactive(0)
-    draining_workers = reactive(0)
-    pending_workers = reactive(0)
-    running_workers = reactive(0)
+    active_count = reactive(0)
+    draining_count = reactive(0)
+    pending_count = reactive(0)
+    running_count = reactive(0)
     target_workers = reactive(0)
     uptime = reactive(0.0)
     started_at: float = 0.0
+    scheduler_status = reactive("")
+    work_queue_status = reactive("")
+    scale_action = reactive("")
 
     def on_mount(self) -> None:
         self.started_at = time.monotonic()
-        self.set_interval(REFRESH_INTERVAL, self._update)
+        self.set_interval(REFRESH_INTERVAL, self._tick_uptime)
 
-    def _update(self) -> None:
-        snapshot = get_snapshot()
-        self.idle_jobs = snapshot.idle_jobs
-        self.active_workers = snapshot.active_workers
-        self.draining_workers = snapshot.draining_workers
-        self.pending_workers = snapshot.pending_workers
-        self.running_workers = snapshot.running_workers
-        self.target_workers = snapshot.target_workers
+    def _tick_uptime(self) -> None:
         self.uptime = time.monotonic() - self.started_at
 
     def render(self) -> Text:
@@ -56,16 +52,23 @@ class PoolStateWidget(Static):
             Text.from_markup("[bold cyan]Pool Manager Status[/bold cyan]"),
             Text.from_markup(f"  Uptime: [green]{self._format_uptime(self.uptime)}[/green]"),
             Text(),
+            Text.from_markup("[bold]Connections[/bold]"),
+            Text.from_markup(f"  Scheduler:  {self.scheduler_status}"),
+            Text.from_markup(f"  Work Queue: {self.work_queue_status}"),
+            Text(),
             Text.from_markup("[bold]HTCondor Queue[/bold]"),
             Text.from_markup(f"  Idle jobs: [yellow]{self.idle_jobs}[/yellow]"),
             Text(),
             Text.from_markup("[bold]Workers[/bold]"),
             Text.from_markup(f"  Target:   [blue]{self.target_workers}[/blue]"),
-            Text.from_markup(f"  Active:   [green]{self.active_workers}[/green]"),
-            Text.from_markup(f"  Running:  [green]{self.running_workers}[/green]"),
-            Text.from_markup(f"  Pending:  [yellow]{self.pending_workers}[/yellow]"),
-            Text.from_markup(f"  Draining: [red]{self.draining_workers}[/red]"),
+            Text.from_markup(f"  Active:   [green]{self.active_count}[/green]"),
+            Text.from_markup(f"  Running:  [green]{self.running_count}[/green]"),
+            Text.from_markup(f"  Pending:  [yellow]{self.pending_count}[/yellow]"),
+            Text.from_markup(f"  Draining: [red]{self.draining_count}[/red]"),
         ]
+        if self.scale_action:
+            lines.append(Text())
+            lines.append(Text.from_markup(f"[bold]Action:[/bold] {self.scale_action}"))
         return Text("\n").join(lines)
 
     @staticmethod
@@ -151,18 +154,35 @@ class PoolManagerTUI(App):
         ("r", "refresh", "Refresh"),
     ]
 
-    idle_jobs = reactive(0)
-    target_workers = reactive(0)
     workers_data: list[WorkerInfo] = []
     placements_data: list[tuple[str, int, int, int, int]] = []
-
-    mock_workers: dict[str, WorkerInfo] = {}
-    mock_placements: list[tuple[str, int, int, int, int]] = []
 
     def __init__(self, config_path: str = "pool-manager.yaml", **kwargs):
         super().__init__(**kwargs)
         self.config_path = Path(config_path)
         self.config = Config.from_file(self.config_path)
+        self._sched: SchedulerBackend | None = None
+        self._wq: WorkQueue | None = None
+        self._planner: PlacementPlanner | None = None
+        self._init_backends()
+
+    def _init_backends(self) -> None:
+        try:
+            self._sched = _make_scheduler(self.config)
+        except Exception as e:
+            logger.warning("Failed to create scheduler backend: {}", e)
+        try:
+            self._wq = _make_work_queue(self.config)
+        except Exception as e:
+            logger.warning("Failed to create work queue backend: {}", e)
+
+        self._planner = PlacementPlanner(
+            node_configs=self.config.scheduler.node_configs or None,
+            task_resources=self.config.scaling.task_resources,
+            batch_size=self.config.scaling.batch_size,
+            max_workers=self.config.scaling.max_workers,
+            min_workers=self.config.scaling.min_workers,
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -178,32 +198,88 @@ class PoolManagerTUI(App):
         self.set_interval(REFRESH_INTERVAL, self._refresh)
 
     def _refresh(self) -> None:
-        snapshot = get_snapshot()
-        self.idle_jobs = snapshot.idle_jobs
-        self.target_workers = snapshot.target_workers
-
         state_widget = self.query_one(PoolStateWidget)
-        state_widget._update()
+
+        idle_tasks: list[TaskResources] = []
+        if self._wq is not None:
+            try:
+                idle_tasks = self._wq.list_idle()
+                state_widget.work_queue_status = "[green]Connected[/green]"
+                state_widget.idle_jobs = len(idle_tasks)
+            except Exception as e:
+                msg = _format_error(e)
+                state_widget.work_queue_status = f"[red]{msg}[/red]"
+                state_widget.idle_jobs = 0
+        else:
+            state_widget.work_queue_status = "[dim]Not configured[/dim]"
+            state_widget.idle_jobs = 0
+
+        active_jobs: list[JobInfo] = []
+        if self._sched is not None:
+            try:
+                active_jobs = self._sched.list_active()
+                state_widget.scheduler_status = (
+                    f"[green]Connected[/green] ({len(active_jobs)} active)"
+                )
+            except Exception as e:
+                msg = _format_error(e)
+                state_widget.scheduler_status = f"[red]{msg}[/red]"
+        else:
+            state_widget.scheduler_status = "[dim]Not configured[/dim]"
+
+        plan: list[Placement] = []
+        target = 0
+        if self._planner is not None:
+            plan = self._planner.plan_for_tasks(idle_tasks)
+            target = sum(p.count for p in plan)
+            target = max(
+                self.config.scaling.min_workers,
+                min(self.config.scaling.max_workers, target),
+            )
+
+        pending_count = sum(1 for j in active_jobs if j.state == JobState.PENDING)
+        running_count = sum(1 for j in active_jobs if j.state == JobState.RUNNING)
+        draining_count = sum(1 for j in active_jobs if j.state == JobState.DRAINING)
+        active_count = pending_count + running_count + draining_count
+
+        state_widget.active_count = active_count
+        state_widget.pending_count = pending_count
+        state_widget.running_count = running_count
+        state_widget.draining_count = draining_count
+        state_widget.target_workers = target
+
+        delta = target - active_count
+        if delta > 0:
+            state_widget.scale_action = f"[green]+{delta} workers needed[/green]"
+        elif delta < 0:
+            state_widget.scale_action = f"[red]{delta} workers to remove[/red]"
+        else:
+            state_widget.scale_action = "[blue]No change needed[/blue]"
 
         table = self.query_one(WorkersTable)
         table.clear()
-        for worker in self.workers_data:
-            table.add_row(worker.job_id, worker.state, worker.node_type)
+        for j in active_jobs:
+            table.add_row(j.job_id, j.state.value, "")
 
+        placements_out: list[tuple[str, int, int, int, int]] = []
+        for p in plan:
+            nc = p.node_config
+            placements_out.append((nc.name, p.count, nc.cpus, nc.memory_mb, nc.gpus))
         placement_widget = self.query_one(PlacementWidget)
-        placement_widget.update_placements(self.placements_data)
-
-    def set_workers(self, workers: list[WorkerInfo]) -> None:
-        self.workers_data = workers
-
-    def set_placements(self, placements: list[tuple[str, int, int, int, int]]) -> None:
-        self.placements_data = placements
+        placement_widget.update_placements(placements_out)
 
     def action_refresh(self) -> None:
         self._refresh()
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         self.exit()
+
+
+def _format_error(exc: Exception) -> str:
+    msg = str(exc)
+    if not msg:
+        return type(exc).__name__
+    return msg[:120]
 
 
 def run_tui(config_path: str = "pool-manager.yaml") -> None:

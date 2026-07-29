@@ -1,4 +1,4 @@
-from pool_manager.tui import PoolManagerTUI, PoolStateWidget, WorkerInfo
+from pool_manager.tui import PoolManagerTUI, PoolStateWidget, WorkerInfo, _format_error
 
 
 class TestWorkerInfo:
@@ -22,6 +22,31 @@ class TestPoolStateWidget:
         assert PoolStateWidget._format_uptime(3600.0) == "1h 0m"
         assert PoolStateWidget._format_uptime(3665.0) == "1h 1m"
 
+    def test_default_render_empty(self):
+        widget = PoolStateWidget()
+        rendered = widget.render().plain
+        assert widget.idle_jobs == 0
+        assert widget.target_workers == 0
+        assert widget.scale_action == ""
+        assert "Idle jobs: 0" in rendered
+        assert "Target:" in rendered
+
+    def test_render_with_connection_errors(self):
+        widget = PoolStateWidget()
+        widget.scheduler_status = "[red]Connection refused[/red]"
+        widget.work_queue_status = "[red]condor_q failed[/red]"
+        rendered = widget.render().plain
+        assert "Connection refused" in rendered
+        assert "condor_q failed" in rendered
+
+    def test_render_with_scale_action(self):
+        widget = PoolStateWidget()
+        widget.scale_action = "[green]+3 workers needed[/green]"
+        widget.target_workers = 5
+        widget.active_count = 2
+        rendered = widget.render().plain
+        assert "+3 workers needed" in rendered
+
 
 class TestPoolManagerTUI:
     def test_init_with_config_path(self, tmp_path):
@@ -31,18 +56,18 @@ class TestPoolManagerTUI:
         app = PoolManagerTUI(config_path=str(config_file))
         assert app.config_path == config_file
         assert app.config.poll_interval == 10.0
+        assert app._sched is not None
+        assert app._wq is not None
+        assert app._planner is not None
 
-    def test_set_workers(self):
-        app = PoolManagerTUI()
-        workers = [
-            WorkerInfo(job_id="job1", state="running", node_type="small"),
-            WorkerInfo(job_id="job2", state="pending", node_type="large"),
-        ]
-        app.set_workers(workers)
-        assert app.workers_data == workers
 
-    def test_set_placements(self):
-        app = PoolManagerTUI()
-        placements = [("small", 2, 4, 8000, 0), ("large", 1, 16, 64000, 0)]
-        app.set_placements(placements)
-        assert app.placements_data == placements
+class TestFormatError:
+    def test_with_message(self):
+        assert _format_error(RuntimeError("sbatch failed")) == "sbatch failed"
+
+    def test_without_message(self):
+        assert _format_error(ValueError()) == "ValueError"
+
+    def test_long_message_truncated(self):
+        long = "x" * 200
+        assert len(_format_error(RuntimeError(long))) == 120

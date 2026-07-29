@@ -1,3 +1,29 @@
+# Session Checkpoint — 2026-07-29
+
+## Summary
+
+The TUI is now a read-only dashboard that directly connects to HTCondor and
+the scheduler, shows connection errors, and displays what action the pool
+manager would take (add/remove workers) based on idle jobs and active workers.
+
+## Files Modified
+
+- **`pool_manager/tui.py`** — major rework:
+  - `PoolManagerTUI` creates scheduler and work queue backends from config at
+    startup (errors caught and displayed, not fatal)
+  - Creates `PlacementPlanner` to compute target worker count and placement
+  - `PoolStateWidget` shows connection status for both backends (green/red/dim)
+  - Shows "Action: +N workers needed" / "-N workers to remove" / "No change"
+  - No longer depends on Prometheus metrics (`get_snapshot` removed)
+  - Workers table populated from scheduler's `list_active()`
+  - `_format_error()` helper for clean error display (truncated to 120 chars)
+
+- **`tests/test_tui.py`** — updated tests:
+  - Added tests for connection error rendering and scale action rendering
+  - Added `_format_error` unit tests (normal message, empty, truncation)
+  - Removed `set_workers`/`set_placements` tests (methods removed)
+  - 11 tests, all passing
+
 # Session Checkpoint — 2026-06-28
 
 ## Summary
