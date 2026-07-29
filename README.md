@@ -220,6 +220,37 @@ nodes.
 Per-node resource requirements (`cpus-per-task`, `mem`, `gpus`) are injected
 into each worker's submit args automatically.
 
+#### Runtime-aware placement
+
+Node configs can optionally specify `time_hrs` or `time_min` to set a maximum
+walltime. Tasks whose `runtime_minutes` exceed the node's limit are placed on
+a different node type (or left unplaced if no type fits). The planner also
+prefers shorter-runtime nodes when capacity is equal, reserving longer queues
+for longer tasks.
+
+```yaml
+scheduler:
+  node_configs:
+    - name: debug_gpu
+      time_min: 30
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+    - name: short_gpu
+      time_hrs: 12
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+    - name: gpu
+      time_hrs: 48
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+```
+
+The runtime is injected into the sbatch job as `--time=HH:MM:00`. Example:
+`time_min: 90` → `--time=01:30:00`.
+
 ### Metrics
 
 Enable Prometheus metrics by setting `metrics_port` in the config:
@@ -244,8 +275,13 @@ Available metrics:
 | `pool_manager_scale_down_events_total` | Counter | Total scale-down events |
 | `pool_manager_tick_duration_seconds` | Histogram | Duration of main loop tick |
 | `pool_manager_workers_by_node_type` | Gauge | Workers by node type |
+| `pool_manager_tasks_by_node_type` | Gauge | Tasks placed by node type |
 
 Access metrics at `http://localhost:9090/metrics`.
+
+A Grafana dashboard is available at `docs/grafana-dashboard.json` covering all
+metrics with panels for worker counts, node-type breakdowns, scale events,
+and tick-duration quantiles.
 
 ### TUI Dashboard
 
@@ -327,10 +363,10 @@ With coverage:
 uv run pytest --cov=pool_manager --cov-report=term-missing
 ```
 
-There are 105+ tests covering config parsing, placement logic (bin-packing,
-GPU/cross-type fallthrough), manager integration (scale-up, scale-down,
-per-type signalling), all scheduler backends, work queue backends, and state
-parsing.
+There are 250+ tests covering config parsing, placement logic (bin-packing,
+runtime-aware placement, GPU/cross-type fallthrough), manager integration
+(scale-up, scale-down, per-type signalling), all scheduler backends, work
+queue backends, and state parsing.
 
 ### Linting
 
