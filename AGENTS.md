@@ -2,27 +2,39 @@
 
 ## Summary
 
-The TUI is now a read-only dashboard that directly connects to HTCondor and
-the scheduler, shows connection errors, and displays what action the pool
-manager would take (add/remove workers) based on idle jobs and active workers.
+TUI now shows both idle and running job counts from the work queue backend.
+`list_idle()` is called once per cycle; idle vs running is determined by the
+`job_status` field on each `TaskResources` object. Only idle tasks are passed
+to the placement planner for action computation.
 
 ## Files Modified
 
-- **`pool_manager/tui.py`** — major rework:
-  - `PoolManagerTUI` creates scheduler and work queue backends from config at
-    startup (errors caught and displayed, not fatal)
-  - Creates `PlacementPlanner` to compute target worker count and placement
-  - `PoolStateWidget` shows connection status for both backends (green/red/dim)
-  - Shows "Action: +N workers needed" / "-N workers to remove" / "No change"
-  - No longer depends on Prometheus metrics (`get_snapshot` removed)
-  - Workers table populated from scheduler's `list_active()`
-  - `_format_error()` helper for clean error display (truncated to 120 chars)
+- **`pool_manager/placement.py`** — added `job_status: int = 0` field to
+  `TaskResources` dataclass (0=unknown, 1=idle, 2=running)
+- **`pool_manager/tui.py`**:
+  - `PoolStateWidget` gains `running_jobs` reactive attribute
+  - Render shows both "Idle:" and "Running:" lines
+  - `_refresh()` separates idle (`job_status==1`) and running (`job_status==2`)
+    tasks after a single `list_idle()` call
+- **`pool_manager/work_queue/condor_python.py`** — `list_idle()` populates
+  `job_status` from the `JobStatus` field (lowercased to `jobstatus`)
+- **`pool_manager/work_queue/condor_rest.py`** — same
+- **`pool_manager/work_queue/condor_subprocess.py`** — same
+- **`tests/test_condor_backends.py`** — task resource assertions include
+  `job_status`
+- **`tests/test_tui.py`** — render assertion updated for new "Idle:" label format
 
-- **`tests/test_tui.py`** — updated tests:
-  - Added tests for connection error rendering and scale action rendering
-  - Added `_format_error` unit tests (normal message, empty, truncation)
-  - Removed `set_workers`/`set_placements` tests (methods removed)
-  - 11 tests, all passing
+## Design Decisions
+
+- Backend `list_idle()` returns all tasks (not just idle ones); callers filter
+  by `t.job_status == 1` when they need only idle tasks. This minimizes the
+  number of backend calls (one per refresh cycle).
+- All three Condor backends lowercase keys, so `job_status` lookup uses
+  `job.get("jobstatus", 0)`.
+
+## Test Stats
+
+260 tests total, all passing, no ruff errors.
 
 # Session Checkpoint — 2026-06-28
 

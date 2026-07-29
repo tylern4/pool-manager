@@ -73,8 +73,8 @@ class TestCondorSubprocessBackend:
             mock_run.return_value.stderr = ""
             tasks = backend.list_idle()
             assert len(tasks) == 2
-            assert tasks[0] == TaskResources(cpus=2.0, memory_mb=4096, gpus=0)
-            assert tasks[1] == TaskResources(cpus=4.0, memory_mb=8192, gpus=1)
+            assert tasks[0] == TaskResources(cpus=2.0, memory_mb=4096, gpus=0, job_status=1)
+            assert tasks[1] == TaskResources(cpus=4.0, memory_mb=8192, gpus=1, job_status=1)
 
     def test_list_idle_defaults_missing_attrs(self):
         backend = CondorSubprocessBackend()
@@ -87,7 +87,7 @@ class TestCondorSubprocessBackend:
             mock_run.return_value.stderr = ""
             tasks = backend.list_idle()
             assert len(tasks) == 1
-            assert tasks[0] == TaskResources(cpus=1.0, memory_mb=1024, gpus=0)
+            assert tasks[0] == TaskResources(cpus=1.0, memory_mb=1024, gpus=0, job_status=0)
 
     def test_list_idle_zero_exit_empty(self):
         backend = CondorSubprocessBackend()
