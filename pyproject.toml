@@ -9,6 +9,7 @@ dependencies = [
     "loguru>=0.7",
     "prometheus-client>=0.20",
     "textual>=0.47",
+    "typer>=0.12",
 ]
 
 [project.optional-dependencies]
