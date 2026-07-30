@@ -128,6 +128,9 @@ class SlurmSubprocessBackend(SchedulerBackend):
 
 
 def _parse_slurm_state(raw: str) -> JobState:
+    stripped = raw.strip()
+    if stripped.startswith("CANCELLED") or stripped == "COMPLETED":
+        return JobState.UNKNOWN
     mapping = {
         "PD": JobState.PENDING,
         "PENDING": JobState.PENDING,
@@ -138,4 +141,4 @@ def _parse_slurm_state(raw: str) -> JobState:
         "CG": JobState.RUNNING,
         "COMPLETING": JobState.RUNNING,
     }
-    return mapping.get(raw.strip(), JobState.UNKNOWN)
+    return mapping.get(stripped, JobState.UNKNOWN)

@@ -235,7 +235,12 @@ class PoolManagerTUI(App):
         active_jobs: list[JobInfo] = []
         if self._sched is not None:
             try:
-                active_jobs = self._sched.list_active()
+                all_jobs = self._sched.list_active()
+                active_jobs = [
+                    j
+                    for j in all_jobs
+                    if j.state in (JobState.PENDING, JobState.RUNNING, JobState.DRAINING)
+                ]
                 state_widget.scheduler_status = (
                     f"[green]Connected[/green] ({len(active_jobs)} active)"
                 )
