@@ -30,6 +30,9 @@ class WorkerInfo:
 class PoolStateWidget(Static):
     idle_jobs = reactive(0)
     running_jobs = reactive(0)
+    total_cpus = reactive(0.0)
+    total_memory_mb = reactive(0)
+    total_gpus = reactive(0)
     active_count = reactive(0)
     draining_count = reactive(0)
     pending_count = reactive(0)
@@ -60,6 +63,11 @@ class PoolStateWidget(Static):
             Text.from_markup("[bold]HTCondor Queue[/bold]"),
             Text.from_markup(f"  Idle:    [yellow]{self.idle_jobs}[/yellow]"),
             Text.from_markup(f"  Running: [green]{self.running_jobs}[/green]"),
+            Text.from_markup(
+                f"  Resources: [cyan]{self.total_cpus:.0f}[/cyan] CPUs  "
+                f"[cyan]{self.total_memory_mb}[/cyan] MB  "
+                f"[cyan]{self.total_gpus}[/cyan] GPUs"
+            ),
             Text(),
             Text.from_markup("[bold]Workers[/bold]"),
             Text.from_markup(f"  Target:   [blue]{self.target_workers}[/blue]"),
@@ -238,15 +246,24 @@ class PoolManagerTUI(App):
                 running_count = sum(1 for t in all_tasks if t.job_status == 2)
                 state_widget.idle_jobs = idle_count
                 state_widget.running_jobs = running_count
+                state_widget.total_cpus = sum(t.cpus for t in all_tasks)
+                state_widget.total_memory_mb = sum(t.memory_mb for t in all_tasks)
+                state_widget.total_gpus = sum(t.gpus for t in all_tasks)
             except Exception as e:
                 msg = _format_error(e)
                 state_widget.work_queue_status = f"[red]{msg}[/red]"
                 state_widget.idle_jobs = 0
                 state_widget.running_jobs = 0
+                state_widget.total_cpus = 0.0
+                state_widget.total_memory_mb = 0
+                state_widget.total_gpus = 0
         else:
             state_widget.work_queue_status = "[dim]Not configured[/dim]"
             state_widget.idle_jobs = 0
             state_widget.running_jobs = 0
+            state_widget.total_cpus = 0.0
+            state_widget.total_memory_mb = 0
+            state_widget.total_gpus = 0
 
         active_jobs: list[JobInfo] = []
         all_jobs: list[JobInfo] = []
