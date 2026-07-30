@@ -1,10 +1,7 @@
 try:
     import htcondor2 as htcondor
 except ImportError:
-    try:
-        import htcondor  # type: ignore[no-redef]
-    except ImportError:
-        htcondor = None
+    htcondor = None
 
 from loguru import logger
 
@@ -33,14 +30,13 @@ class CondorPythonBackend(CondorBackend):
         result = schedd.query(**kw)
         tasks = []
         for job in result:
-            job = {k.lower(): v for k, v in job.items()}
             tasks.append(
                 TaskResources(
-                    cpus=float(job.get("requestcpus", 1)),
-                    memory_mb=int(job.get("requestmemory", 1024)),
-                    gpus=int(job.get("requestgpus", 0)),
-                    runtime_minutes=int(job.get("runtime_minutes", 0)),
-                    job_status=int(job.get("jobstatus", 0)),
+                    cpus=float(job.get("RequestCpus", 1) or 1),
+                    memory_mb=int(job.get("RequestMemory", 1024) or 1024),
+                    gpus=int(job.get("RequestGpus", 0) or 0),
+                    runtime_minutes=int(job.get("runtime_minutes", 0) or 0),
+                    job_status=int(job.get("JobStatus", 0) or 0),
                 )
             )
         logger.debug("HTCondor idle job count: {}", len(tasks))

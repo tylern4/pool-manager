@@ -7,10 +7,7 @@ from typing import cast
 try:
     import htcondor2 as htcondor
 except ImportError:
-    try:
-        import htcondor  # type: ignore[no-redef]
-    except ImportError:
-        htcondor = None
+    htcondor = None
 
 from loguru import logger
 
@@ -230,12 +227,16 @@ class PoolManager:
     def _recover_state(self):
         active = self._sched.list_active()
         prefix = self._config.scheduler.job_name_prefix
+        active_count = 0
         for aj in active:
+            if aj.state == JobState.COMPLETED:
+                continue
             self._tracked[aj.job_id] = aj
             config_name = parse_config_name(aj.job_name, prefix)
             self._node_assignments.setdefault(aj.job_id, config_name)
-        if active:
-            logger.info("Recovered {} active worker(s) from scheduler", len(active))
+            active_count += 1
+        if active_count > 0:
+            logger.info("Recovered {} active worker(s) from scheduler", active_count)
 
     def _reconcile(self):
         active = self._sched.list_active()
