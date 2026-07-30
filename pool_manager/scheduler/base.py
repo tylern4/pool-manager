@@ -26,6 +26,21 @@ class JobInfo:
     job_id: str
     state: JobState
     job_name: str = ""
+    submit_time: float = 0.0
+    start_time: float = 0.0
+    end_time: float = 0.0
+
+    @property
+    def queue_time(self) -> float:
+        if self.start_time > 0 and self.submit_time > 0:
+            return self.start_time - self.submit_time
+        return 0.0
+
+    @property
+    def runtime(self) -> float:
+        if self.end_time > 0 and self.start_time > 0:
+            return self.end_time - self.start_time
+        return 0.0
 
 
 def parse_config_name(job_name: str, prefix: str = "htcondor_worker_") -> str:

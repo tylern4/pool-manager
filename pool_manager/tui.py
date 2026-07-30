@@ -89,11 +89,33 @@ class PoolStateWidget(Static):
 
 class WorkersTable(DataTable):
     def on_mount(self) -> None:
-        self.add_columns("Job ID", "State", "Node Type")
+        self.add_columns("Job ID", "State", "Node Type", "Queue Time")
         self.set_interval(REFRESH_INTERVAL, self._update)
 
     def _update(self) -> None:
         pass
+
+
+class CompletedJobsWidget(Static):
+    jobs: list[tuple[str, str, str]] = []
+
+    def update_jobs(self, jobs: list[tuple[str, str, str]]) -> None:
+        self.jobs = jobs
+        self.refresh()
+
+    def render(self) -> Text:
+        if not self.jobs:
+            return Text("\n").join(
+                [
+                    Text.from_markup("[bold]Completed Jobs[/bold]"),
+                    Text.from_markup("  [dim]None[/dim]"),
+                ]
+            )
+
+        lines = [Text.from_markup("[bold]Completed Jobs[/bold]")]
+        for name, job_id, runtime_str in self.jobs:
+            lines.append(Text.from_markup(f"  {name} ({job_id}): [green]{runtime_str}[/green]"))
+        return Text("\n").join(lines)
 
 
 class PlacementWidget(Static):
@@ -159,6 +181,13 @@ class PoolManagerTUI(App):
         height: 1fr;
         border: solid yellow;
     }
+
+    CompletedJobsWidget {
+        height: auto;
+        padding: 1;
+        border: solid magenta;
+        min-height: 3;
+    }
     """
 
     BINDINGS = [
@@ -204,6 +233,7 @@ class PoolManagerTUI(App):
                 yield PlacementWidget()
             with Container(classes="right-panel"):
                 yield WorkersTable()
+                yield CompletedJobsWidget()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -233,6 +263,7 @@ class PoolManagerTUI(App):
             state_widget.running_jobs = 0
 
         active_jobs: list[JobInfo] = []
+        all_jobs: list[JobInfo] = []
         if self._sched is not None:
             try:
                 all_jobs = self._sched.list_active()
@@ -285,7 +316,17 @@ class PoolManagerTUI(App):
         table.clear()
         for j in active_jobs:
             node_type = parse_config_name(j.job_name, prefix)
-            table.add_row(j.job_id, j.state.value, node_type)
+            qt = _format_duration(j.queue_time) if j.queue_time > 0 else ""
+            table.add_row(j.job_id, j.state.value, node_type, qt)
+
+        completed = [j for j in all_jobs if j.state == JobState.COMPLETED]
+        completed_out: list[tuple[str, str, str]] = []
+        for j in completed:
+            node_type = parse_config_name(j.job_name, prefix)
+            rt = _format_duration(j.runtime) if j.runtime > 0 else "N/A"
+            completed_out.append((node_type, j.job_id, rt))
+        completed_widget = self.query_one(CompletedJobsWidget)
+        completed_widget.update_jobs(completed_out)
 
         existing_per_type: dict[str, int] = {}
         for j in active_jobs:
@@ -318,6 +359,16 @@ def _format_error(exc: Exception) -> str:
     if not msg:
         return type(exc).__name__
     return msg[:120]
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 0:
+        return "N/A"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f}m"
+    return f"{seconds / 3600:.2f}h"
 
 
 def run_tui(config_path: str = "pool-manager.yaml") -> None:
