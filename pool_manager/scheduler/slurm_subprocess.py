@@ -77,6 +77,7 @@ class SlurmSubprocessBackend(SchedulerBackend):
     def list_active(self) -> list[JobInfo]:
         cmd = [
             "sacct",
+            "-X",
             "--noheader",
             "--parsable2",
             "--format=JobID,JobName,State,Submit,Start,End",
