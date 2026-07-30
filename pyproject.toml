@@ -10,6 +10,7 @@ dependencies = [
     "prometheus-client>=0.20",
     "textual>=0.47",
     "typer>=0.12",
+    "svg-py>=1.10.0",
 ]
 
 [project.optional-dependencies]
