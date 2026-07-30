@@ -1,3 +1,41 @@
+# Session Checkpoint — 2026-07-29
+
+## Summary
+
+TUI now shows both idle and running job counts from the work queue backend.
+`list_idle()` is called once per cycle; idle vs running is determined by the
+`job_status` field on each `TaskResources` object. Only idle tasks are passed
+to the placement planner for action computation.
+
+## Files Modified
+
+- **`pool_manager/placement.py`** — added `job_status: int = 0` field to
+  `TaskResources` dataclass (0=unknown, 1=idle, 2=running)
+- **`pool_manager/tui.py`**:
+  - `PoolStateWidget` gains `running_jobs` reactive attribute
+  - Render shows both "Idle:" and "Running:" lines
+  - `_refresh()` separates idle (`job_status==1`) and running (`job_status==2`)
+    tasks after a single `list_idle()` call
+- **`pool_manager/work_queue/condor_python.py`** — `list_idle()` populates
+  `job_status` from the `JobStatus` field (lowercased to `jobstatus`)
+- **`pool_manager/work_queue/condor_rest.py`** — same
+- **`pool_manager/work_queue/condor_subprocess.py`** — same
+- **`tests/test_condor_backends.py`** — task resource assertions include
+  `job_status`
+- **`tests/test_tui.py`** — render assertion updated for new "Idle:" label format
+
+## Design Decisions
+
+- Backend `list_idle()` returns all tasks (not just idle ones); callers filter
+  by `t.job_status == 1` when they need only idle tasks. This minimizes the
+  number of backend calls (one per refresh cycle).
+- All three Condor backends lowercase keys, so `job_status` lookup uses
+  `job.get("jobstatus", 0)`.
+
+## Test Stats
+
+260 tests total, all passing, no ruff errors.
+
 # Session Checkpoint — 2026-06-28
 
 ## Summary

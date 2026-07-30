@@ -73,8 +73,8 @@ class TestCondorSubprocessBackend:
             mock_run.return_value.stderr = ""
             tasks = backend.list_idle()
             assert len(tasks) == 2
-            assert tasks[0] == TaskResources(cpus=2.0, memory_mb=4096, gpus=0)
-            assert tasks[1] == TaskResources(cpus=4.0, memory_mb=8192, gpus=1)
+            assert tasks[0] == TaskResources(cpus=2.0, memory_mb=4096, gpus=0, job_status=1)
+            assert tasks[1] == TaskResources(cpus=4.0, memory_mb=8192, gpus=1, job_status=1)
 
     def test_list_idle_defaults_missing_attrs(self):
         backend = CondorSubprocessBackend()
@@ -87,7 +87,7 @@ class TestCondorSubprocessBackend:
             mock_run.return_value.stderr = ""
             tasks = backend.list_idle()
             assert len(tasks) == 1
-            assert tasks[0] == TaskResources(cpus=1.0, memory_mb=1024, gpus=0)
+            assert tasks[0] == TaskResources(cpus=1.0, memory_mb=1024, gpus=0, job_status=0)
 
     def test_list_idle_zero_exit_empty(self):
         backend = CondorSubprocessBackend()
@@ -144,15 +144,27 @@ class TestCondorRESTAPIBackend:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
-                {"ClusterId": 1, "RequestCpus": 2.0, "RequestMemory": 4096, "RequestGpus": 0},
-                {"ClusterId": 2, "RequestCpus": 4.0, "RequestMemory": 8192, "RequestGpus": 1},
+                {
+                    "ClusterId": 1,
+                    "JobStatus": 1,
+                    "RequestCpus": 2.0,
+                    "RequestMemory": 4096,
+                    "RequestGpus": 0,
+                },
+                {
+                    "ClusterId": 2,
+                    "JobStatus": 2,
+                    "RequestCpus": 4.0,
+                    "RequestMemory": 8192,
+                    "RequestGpus": 1,
+                },
             ]
         }
         with patch("httpx.get", return_value=mock_response):
             tasks = backend.list_idle()
             assert len(tasks) == 2
-            assert tasks[0] == TaskResources(cpus=2.0, memory_mb=4096, gpus=0)
-            assert tasks[1] == TaskResources(cpus=4.0, memory_mb=8192, gpus=1)
+            assert tasks[0] == TaskResources(cpus=2.0, memory_mb=4096, gpus=0, job_status=1)
+            assert tasks[1] == TaskResources(cpus=4.0, memory_mb=8192, gpus=1, job_status=2)
 
     def test_list_idle_defaults_missing_attrs(self):
         backend = CondorRESTAPIBackend(url="http://htcondor:8080")

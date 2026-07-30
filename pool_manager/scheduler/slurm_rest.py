@@ -50,7 +50,7 @@ class SlurmRESTAPIBackend(SchedulerBackend):
             raise FileNotFoundError(f"Worker script not found: {script_path}")
         script_content = script_path_p.read_text()
 
-        payload = {"script": script_content}
+        payload: dict[str, object] = {"script": script_content}
         if submit_args:
             payload["job"] = submit_args
 
@@ -111,6 +111,8 @@ class SlurmRESTAPIBackend(SchedulerBackend):
 
 
 def _parse_slurm_rest_state(raw: str) -> JobState:
+    if raw in ("CANCELLED", "COMPLETED"):
+        return JobState.COMPLETED
     mapping = {
         "PENDING": JobState.PENDING,
         "RUNNING": JobState.RUNNING,

@@ -5,7 +5,6 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 
 
 def _test_job_id() -> str:
@@ -16,6 +15,7 @@ class JobState(Enum):
     RUNNING = "running"
     PENDING = "pending"
     DRAINING = "draining"
+    COMPLETED = "completed"
     EXITED = "exited"
     UNKNOWN = "unknown"
 
@@ -25,6 +25,21 @@ class JobInfo:
     job_id: str
     state: JobState
     job_name: str = ""
+    submit_time: float = 0.0
+    start_time: float = 0.0
+    end_time: float = 0.0
+
+    @property
+    def queue_time(self) -> float:
+        if self.start_time > 0 and self.submit_time > 0:
+            return self.start_time - self.submit_time
+        return 0.0
+
+    @property
+    def runtime(self) -> float:
+        if self.end_time > 0 and self.start_time > 0:
+            return self.end_time - self.start_time
+        return 0.0
 
 
 def parse_config_name(job_name: str, prefix: str = "htcondor_worker_") -> str:
@@ -40,12 +55,13 @@ class NodeConfig:
     memory_mb: int = 1024
     gpus: int = 0
     runtime_minutes: int = 0
+    priority: int = 0
     submit_args: dict[str, str] | None = None
 
 
 class SchedulerBackend(ABC):
     @abstractmethod
-    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str: ...
+    def submit(self, script_path: str, submit_args: dict[str, str]) -> str: ...
 
     @abstractmethod
     def cancel(self, job_id: str) -> None: ...

@@ -60,5 +60,5 @@ class TestSlurmRESTStateParsing:
     def test_completing(self):
         assert _parse_slurm_rest_state("COMPLETING") == JobState.RUNNING
 
-    def test_unknown(self):
-        assert _parse_slurm_rest_state("CANCELLED") == JobState.UNKNOWN
+    def test_cancelled(self):
+        assert _parse_slurm_rest_state("CANCELLED") == JobState.COMPLETED

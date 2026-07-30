@@ -23,7 +23,7 @@ class CondorRESTAPIBackend(CondorBackend):
             headers["Authorization"] = f"Bearer {self._token}"
 
         params: dict[str, str] = {
-            "projection": "ClusterId,RequestCpus,RequestMemory,RequestGpus",
+            "projection": "ClusterId,JobStatus,RequestCpus,RequestMemory,RequestGpus",
         }
         if constraint:
             params["constraint"] = constraint
@@ -45,6 +45,7 @@ class CondorRESTAPIBackend(CondorBackend):
                     memory_mb=int(job.get("requestmemory", 1024)),
                     gpus=int(job.get("requestgpus", 0)),
                     runtime_minutes=int(job.get("runtime_minutes", 0)),
+                    job_status=int(job.get("jobstatus", 0)),
                 )
             )
         logger.debug("HTCondor REST idle count: {}", len(tasks))

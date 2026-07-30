@@ -146,6 +146,8 @@ def _sfapi_to_jobstate(state) -> JobState:
         SFApiJobState.REQUEUED,
         SFApiJobState.SUSPENDED,
     }
+    if state in (SFApiJobState.CANCELLED, SFApiJobState.COMPLETED):
+        return JobState.COMPLETED
     if state in active_states:
         if state in (
             SFApiJobState.RUNNING,

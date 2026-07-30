@@ -22,6 +22,7 @@ class SchedulerConfig:
     worker_script: str = ""
     submit_args: dict[str, Any] = field(default_factory=dict)
     node_configs: list[NodeConfig] = field(default_factory=list)
+    cluster: str = ""
     rest_url: str = ""
     rest_token: str = ""
     machine: str = ""
@@ -69,6 +70,7 @@ class Config:
                 memory_mb=int(n.get("memory_mb", n.get("memory_gb", 1.024) * 1000)),
                 gpus=int(n.get("gpus", 0)),
                 runtime_minutes=int(n.get("time_hrs", 0) * 60 + n.get("time_min", 0)),
+                priority=int(n.get("priority", 0)),
                 submit_args=n.get("submit_args"),
             )
             for n in node_configs_raw
@@ -91,6 +93,7 @@ class Config:
                 worker_script=sch.get("worker_script", ""),
                 submit_args=sch.get("submit_args", {}),
                 node_configs=node_configs,
+                cluster=sch.get("cluster", ""),
                 rest_url=sch.get("rest_url", ""),
                 rest_token=sch.get("rest_token", ""),
                 machine=sch.get("machine", ""),

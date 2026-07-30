@@ -2,9 +2,10 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import cast
 
 try:
-    import htcondor
+    import htcondor2 as htcondor
 except ImportError:
     htcondor = None
 
@@ -67,7 +68,10 @@ def _make_scheduler(cfg) -> SchedulerBackend:
     match sch.backend:
         case "slurm_subprocess":
             backend = SlurmSubprocessBackend(
-                job_name_prefix=job_name_prefix, test_mode=sch.test_mode, user=user
+                job_name_prefix=job_name_prefix,
+                test_mode=sch.test_mode,
+                user=user,
+                cluster=sch.cluster,
             )
         case "slurm_rest":
             backend = SlurmRESTAPIBackend(
@@ -223,12 +227,16 @@ class PoolManager:
     def _recover_state(self):
         active = self._sched.list_active()
         prefix = self._config.scheduler.job_name_prefix
+        active_count = 0
         for aj in active:
+            if aj.state == JobState.COMPLETED:
+                continue
             self._tracked[aj.job_id] = aj
             config_name = parse_config_name(aj.job_name, prefix)
             self._node_assignments.setdefault(aj.job_id, config_name)
-        if active:
-            logger.info("Recovered {} active worker(s) from scheduler", len(active))
+            active_count += 1
+        if active_count > 0:
+            logger.info("Recovered {} active worker(s) from scheduler", active_count)
 
     def _reconcile(self):
         active = self._sched.list_active()
@@ -272,8 +280,13 @@ class PoolManager:
                 logger.debug("Scale-up cooldown active, skipping")
                 return
             to_add = target - active
-            logger.debug(
-                "Scaling UP: adding {} workers (target={} active={})", to_add, target, active
+            type_names = ", ".join(p.node_config.name for p in plan)
+            logger.info(
+                "Scaling UP: adding {} {} worker(s) (target={} active={})",
+                to_add,
+                type_names,
+                target,
+                active,
             )
             self._start_workers(plan, to_add)
             self._last_scale_up = now
@@ -307,7 +320,7 @@ class PoolManager:
                 and self._drain_start is not None
             )
             if can_force:
-                deadline = self._drain_start + self._policy.drain_timeout
+                deadline = cast(float, self._drain_start) + self._policy.drain_timeout
                 if now > deadline and self._policy.scale_down_cooldown > 0:
                     self._force_cancel_draining()
 
@@ -332,8 +345,11 @@ class PoolManager:
                     total_needed += needed
 
             if total_needed > 0:
+                plan_desc = ", ".join(f"{p.count}x {p.node_config.name}" for p in adjusted_plan)
+                logger.info("Scaling up {} worker(s): {}", min(count, total_needed), plan_desc)
                 self._start_workers_from_plan(adjusted_plan, min(count, total_needed))
         else:
+            logger.info("Scaling up {} worker(s) (default type)", count)
             self._start_workers_simple(count)
 
     def _signal_workers(self, count: int, plan: list[Placement] | None = None):

@@ -1,6 +1,7 @@
 import os
 import shlex
 import subprocess
+from datetime import datetime
 
 from loguru import logger
 
@@ -17,11 +18,16 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 class SlurmSubprocessBackend(SchedulerBackend):
     def __init__(
-        self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False, user: str = ""
+        self,
+        job_name_prefix: str = "htcondor_worker_",
+        test_mode: bool = False,
+        user: str = "",
+        cluster: str = "",
     ):
         self._job_name_prefix = job_name_prefix
         self._test_mode = test_mode
         self.user = user
+        self._cluster = cluster
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["sbatch", "--parsable"]
@@ -71,12 +77,15 @@ class SlurmSubprocessBackend(SchedulerBackend):
     def list_active(self) -> list[JobInfo]:
         cmd = [
             "sacct",
+            "-X",
             "--noheader",
             "--parsable2",
-            "--format=JobID,JobName,State",
+            "--format=JobID,JobName,State,Submit,Start,End",
             "--user",
             self._user,
         ]
+        if self._cluster:
+            cmd.extend(["--cluster", self._cluster])
         result = _run(cmd)
         if result.returncode != 0:
             logger.warning("sacct failed (exit {}): {}", result.returncode, result.stderr.strip())
@@ -87,16 +96,26 @@ class SlurmSubprocessBackend(SchedulerBackend):
             line = line.strip()
             if not line:
                 continue
-            parts = line.split("|", 2)
-            if len(parts) != 3:
+            parts = line.split("|", 5)
+            if len(parts) != 6:
                 continue
-            job_id, job_name, state_str = parts
-            if "." in job_id:
-                continue
+            job_id, job_name, state_str, submit_str, start_str, end_str = parts
             if self._job_name_prefix and not job_name.startswith(self._job_name_prefix):
                 continue
             state = _parse_slurm_state(state_str.strip())
-            jobs.append(JobInfo(job_id=job_id, state=state, job_name=job_name))
+            submit_time = _parse_sacct_time(submit_str)
+            start_time = _parse_sacct_time(start_str)
+            end_time = _parse_sacct_time(end_str)
+            jobs.append(
+                JobInfo(
+                    job_id=job_id,
+                    state=state,
+                    job_name=job_name,
+                    submit_time=submit_time,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            )
 
         logger.debug("Active Slurm jobs: {}", [j.job_id for j in jobs])
         return jobs
@@ -128,6 +147,9 @@ class SlurmSubprocessBackend(SchedulerBackend):
 
 
 def _parse_slurm_state(raw: str) -> JobState:
+    stripped = raw.strip()
+    if stripped.startswith("CANCELLED") or stripped == "COMPLETED":
+        return JobState.COMPLETED
     mapping = {
         "PD": JobState.PENDING,
         "PENDING": JobState.PENDING,
@@ -138,4 +160,13 @@ def _parse_slurm_state(raw: str) -> JobState:
         "CG": JobState.RUNNING,
         "COMPLETING": JobState.RUNNING,
     }
-    return mapping.get(raw.strip(), JobState.UNKNOWN)
+    return mapping.get(stripped, JobState.UNKNOWN)
+
+
+def _parse_sacct_time(raw: str) -> float:
+    if not raw or raw == "Unknown":
+        return 0.0
+    try:
+        return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%S").timestamp()
+    except ValueError:
+        return 0.0
