@@ -166,7 +166,7 @@ class PoolManagerTUI(App):
     }
 
     WorkersTable {
-        height: 3fr;
+        height: 1fr;
         border: solid yellow;
     }
 
