@@ -65,7 +65,7 @@ class PoolStateWidget(Static):
             Text.from_markup(f"  Running: [green]{self.running_jobs}[/green]"),
             Text.from_markup(
                 f"  Resources: [cyan]{self.total_cpus:.0f}[/cyan] CPUs  "
-                f"[cyan]{self.total_memory_mb}[/cyan] MB  "
+                f"[cyan]{self.total_memory_mb / 1024:.0f}[/cyan] GB  "
                 f"[cyan]{self.total_gpus}[/cyan] GPUs"
             ),
             Text(),
