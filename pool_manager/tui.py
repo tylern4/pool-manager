@@ -45,6 +45,7 @@ class PoolStateWidget(Static):
     scale_action = reactive("")
 
     def on_mount(self) -> None:
+        self.border_title = "Pool Manager Status"
         self.started_at = time.monotonic()
         self.set_interval(REFRESH_INTERVAL, self._tick_uptime)
 
@@ -53,7 +54,6 @@ class PoolStateWidget(Static):
 
     def render(self) -> Text:
         lines = [
-            Text.from_markup("[bold cyan]Pool Manager Status[/bold cyan]"),
             Text.from_markup(f"  Uptime: [green]{self._format_uptime(self.uptime)}[/green]"),
             Text(),
             Text.from_markup("[bold]Connections[/bold]"),
@@ -118,12 +118,15 @@ class CompletedJobsTable(DataTable):
 class PlacementWidget(Static):
     placements: list[tuple[str, int, int, int, int, int]] = []
 
+    def on_mount(self) -> None:
+        self.border_title = "Placement Plan"
+
     def update_placements(self, placements: list[tuple[str, int, int, int, int, int]]) -> None:
         self.placements = placements
         self.refresh()
 
     def render(self) -> Text:
-        lines = [Text.from_markup("[bold]Placement Plan[/bold]")]
+        lines: list[Text] = []
         if not self.placements:
             lines.append(Text.from_markup("  [yellow]No change needed[/yellow]"))
         else:
