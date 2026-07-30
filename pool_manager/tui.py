@@ -97,6 +97,7 @@ class PoolStateWidget(Static):
 
 class WorkersTable(DataTable):
     def on_mount(self) -> None:
+        self.border_title = "Active"
         self.add_columns("Job ID", "State", "Node Type", "Queue Time")
         self.set_interval(REFRESH_INTERVAL, self._update)
 
@@ -106,6 +107,7 @@ class WorkersTable(DataTable):
 
 class CompletedJobsTable(DataTable):
     def on_mount(self) -> None:
+        self.border_title = "Completed"
         self.add_columns("Job ID", "Node Type", "Queue Time", "Runtime")
         self.set_interval(REFRESH_INTERVAL, self._update)
 
