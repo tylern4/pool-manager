@@ -70,6 +70,7 @@ class Config:
                 memory_mb=int(n.get("memory_mb", n.get("memory_gb", 1.024) * 1000)),
                 gpus=int(n.get("gpus", 0)),
                 runtime_minutes=int(n.get("time_hrs", 0) * 60 + n.get("time_min", 0)),
+                priority=int(n.get("priority", 0)),
                 submit_args=n.get("submit_args"),
             )
             for n in node_configs_raw

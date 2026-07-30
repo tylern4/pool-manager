@@ -76,8 +76,11 @@ class PlacementPlanner:
 
         sorted_configs = sorted(
             configs,
-            key=lambda n: (n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1), -n.runtime_minutes),
-            reverse=True,
+            key=lambda n: (
+                n.priority,
+                -(n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1)),
+                n.runtime_minutes,
+            ),
         )
 
         remaining = idle_count
@@ -179,8 +182,11 @@ class PlacementPlanner:
 
         sorted_configs = sorted(
             self._node_configs,
-            key=lambda n: (n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1), -n.runtime_minutes),
-            reverse=True,
+            key=lambda n: (
+                n.priority,
+                -(n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1)),
+                n.runtime_minutes,
+            ),
         )
 
         sorted_tasks = sorted(
