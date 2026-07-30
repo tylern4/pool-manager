@@ -280,8 +280,13 @@ class PoolManager:
                 logger.debug("Scale-up cooldown active, skipping")
                 return
             to_add = target - active
-            logger.debug(
-                "Scaling UP: adding {} workers (target={} active={})", to_add, target, active
+            plan_desc = ", ".join(f"{p.count}x {p.node_config.name}" for p in plan)
+            logger.info(
+                "Scaling UP: adding {} worker(s) (target={} active={} plan={})",
+                to_add,
+                target,
+                active,
+                plan_desc,
             )
             self._start_workers(plan, to_add)
             self._last_scale_up = now
