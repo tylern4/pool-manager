@@ -25,11 +25,11 @@ class TestSFApiJobStateMapping:
     def test_signaling(self):
         assert _sfapi_to_jobstate(S.SIGNALING) == JobState.RUNNING
 
-    def test_cancelled_is_unknown(self):
-        assert _sfapi_to_jobstate(S.CANCELLED) == JobState.UNKNOWN
+    def test_cancelled(self):
+        assert _sfapi_to_jobstate(S.CANCELLED) == JobState.COMPLETED
 
-    def test_completed_is_unknown(self):
-        assert _sfapi_to_jobstate(S.COMPLETED) == JobState.UNKNOWN
+    def test_completed(self):
+        assert _sfapi_to_jobstate(S.COMPLETED) == JobState.COMPLETED
 
 
 class TestSlurmSFAPIBackend:

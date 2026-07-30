@@ -111,6 +111,8 @@ class SlurmRESTAPIBackend(SchedulerBackend):
 
 
 def _parse_slurm_rest_state(raw: str) -> JobState:
+    if raw in ("CANCELLED", "COMPLETED"):
+        return JobState.COMPLETED
     mapping = {
         "PENDING": JobState.PENDING,
         "RUNNING": JobState.RUNNING,

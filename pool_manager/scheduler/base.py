@@ -16,6 +16,7 @@ class JobState(Enum):
     RUNNING = "running"
     PENDING = "pending"
     DRAINING = "draining"
+    COMPLETED = "completed"
     EXITED = "exited"
     UNKNOWN = "unknown"
 
