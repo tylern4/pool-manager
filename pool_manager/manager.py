@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 try:
-    import htcondor
+    import htcondor2 as htcondor
 except ImportError:
     htcondor = None
 
