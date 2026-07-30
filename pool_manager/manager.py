@@ -7,7 +7,10 @@ from typing import cast
 try:
     import htcondor2 as htcondor
 except ImportError:
-    htcondor = None
+    try:
+        import htcondor  # type: ignore[no-redef]
+    except ImportError:
+        htcondor = None
 
 from loguru import logger
 
