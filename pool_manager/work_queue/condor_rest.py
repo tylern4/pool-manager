@@ -23,7 +23,7 @@ class CondorRESTAPIBackend(CondorBackend):
             headers["Authorization"] = f"Bearer {self._token}"
 
         params: dict[str, str] = {
-            "projection": "ClusterId,RequestCpus,RequestMemory,RequestGpus",
+            "projection": "ClusterId,JobStatus,RequestCpus,RequestMemory,RequestGpus",
         }
         if constraint:
             params["constraint"] = constraint

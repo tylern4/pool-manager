@@ -18,7 +18,7 @@ class CondorPythonBackend(CondorBackend):
 
     def list_idle(self, constraint: str = "") -> list[TaskResources]:
         schedd = htcondor.Schedd(self._schedd_name) if self._schedd_name else htcondor.Schedd()
-        projection = ["ClusterId", "RequestCpus", "RequestMemory", "RequestGpus"]
+        projection = ["ClusterId", "JobStatus", "RequestCpus", "RequestMemory", "RequestGpus"]
         logger.debug(
             "Querying HTCondor schedd '{}' with constraint: {}",
             self._schedd_name or "(default)",
