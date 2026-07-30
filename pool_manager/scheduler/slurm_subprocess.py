@@ -18,11 +18,16 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 class SlurmSubprocessBackend(SchedulerBackend):
     def __init__(
-        self, job_name_prefix: str = "htcondor_worker_", test_mode: bool = False, user: str = ""
+        self,
+        job_name_prefix: str = "htcondor_worker_",
+        test_mode: bool = False,
+        user: str = "",
+        cluster: str = "",
     ):
         self._job_name_prefix = job_name_prefix
         self._test_mode = test_mode
         self.user = user
+        self._cluster = cluster
 
     def submit(self, script_path: str, submit_args: dict[str, str]) -> str:
         cmd = ["sbatch", "--parsable"]
@@ -78,6 +83,8 @@ class SlurmSubprocessBackend(SchedulerBackend):
             "--user",
             self._user,
         ]
+        if self._cluster:
+            cmd.extend(["--cluster", self._cluster])
         result = _run(cmd)
         if result.returncode != 0:
             logger.warning("sacct failed (exit {}): {}", result.returncode, result.stderr.strip())

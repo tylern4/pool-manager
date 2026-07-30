@@ -67,7 +67,10 @@ def _make_scheduler(cfg) -> SchedulerBackend:
     match sch.backend:
         case "slurm_subprocess":
             backend = SlurmSubprocessBackend(
-                job_name_prefix=job_name_prefix, test_mode=sch.test_mode, user=user
+                job_name_prefix=job_name_prefix,
+                test_mode=sch.test_mode,
+                user=user,
+                cluster=sch.cluster,
             )
         case "slurm_rest":
             backend = SlurmRESTAPIBackend(

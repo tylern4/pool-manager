@@ -22,6 +22,7 @@ class SchedulerConfig:
     worker_script: str = ""
     submit_args: dict[str, Any] = field(default_factory=dict)
     node_configs: list[NodeConfig] = field(default_factory=list)
+    cluster: str = ""
     rest_url: str = ""
     rest_token: str = ""
     machine: str = ""
@@ -91,6 +92,7 @@ class Config:
                 worker_script=sch.get("worker_script", ""),
                 submit_args=sch.get("submit_args", {}),
                 node_configs=node_configs,
+                cluster=sch.get("cluster", ""),
                 rest_url=sch.get("rest_url", ""),
                 rest_token=sch.get("rest_token", ""),
                 machine=sch.get("machine", ""),
