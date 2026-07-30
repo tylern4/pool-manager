@@ -5,7 +5,6 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 
 
 def _test_job_id() -> str:
@@ -61,7 +60,7 @@ class NodeConfig:
 
 class SchedulerBackend(ABC):
     @abstractmethod
-    def submit(self, script_path: Path, submit_args: dict[str, str]) -> str: ...
+    def submit(self, script_path: str, submit_args: dict[str, str]) -> str: ...
 
     @abstractmethod
     def cancel(self, job_id: str) -> None: ...

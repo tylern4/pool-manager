@@ -2,6 +2,7 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import cast
 
 try:
     import htcondor
@@ -310,7 +311,7 @@ class PoolManager:
                 and self._drain_start is not None
             )
             if can_force:
-                deadline = self._drain_start + self._policy.drain_timeout
+                deadline = cast(float, self._drain_start) + self._policy.drain_timeout
                 if now > deadline and self._policy.scale_down_cooldown > 0:
                     self._force_cancel_draining()
 
