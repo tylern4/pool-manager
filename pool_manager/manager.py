@@ -340,8 +340,11 @@ class PoolManager:
                     total_needed += needed
 
             if total_needed > 0:
+                plan_desc = ", ".join(f"{p.count}x {p.node_config.name}" for p in adjusted_plan)
+                logger.info("Scaling up {} worker(s): {}", min(count, total_needed), plan_desc)
                 self._start_workers_from_plan(adjusted_plan, min(count, total_needed))
         else:
+            logger.info("Scaling up {} worker(s) (default type)", count)
             self._start_workers_simple(count)
 
     def _signal_workers(self, count: int, plan: list[Placement] | None = None):
