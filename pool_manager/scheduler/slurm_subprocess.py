@@ -100,8 +100,6 @@ class SlurmSubprocessBackend(SchedulerBackend):
             if len(parts) != 6:
                 continue
             job_id, job_name, state_str, submit_str, start_str, end_str = parts
-            if "." in job_id:
-                continue
             if self._job_name_prefix and not job_name.startswith(self._job_name_prefix):
                 continue
             state = _parse_slurm_state(state_str.strip())
