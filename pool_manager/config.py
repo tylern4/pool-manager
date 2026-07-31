@@ -33,6 +33,7 @@ class SchedulerConfig:
     user: str = ""
     job_name_prefix: str = "htcondor_worker_"
     test_mode: bool = False
+    placement_strategy: str = "runtime_aware"
 
 
 @dataclass
@@ -104,6 +105,7 @@ class Config:
                 user=sch.get("user", ""),
                 job_name_prefix=sch.get("job_name_prefix", "htcondor_worker_"),
                 test_mode=sch.get("test_mode", False),
+                placement_strategy=sch.get("placement_strategy", "runtime_aware"),
             ),
             scaling=ScalingPolicy(
                 min_workers=sc.get("min_workers", 0),

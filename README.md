@@ -192,7 +192,32 @@ scheduler:
   sfapi_user: ""                              # filter jobs by user (default: all)
 ```
 
-### Node-aware placement
+### Placement strategies
+
+Placement is selected with `scheduler.placement_strategy`, one of:
+
+| Strategy | Description |
+|----------|-------------|
+| `simple` | `batch_size`-based scaling; ignores `node_configs` |
+| `node_aware` | Bin-packs idle tasks into the minimum number of `node_configs` nodes by CPU/memory/GPU |
+| `runtime_aware` | `node_aware` plus wall-time matching against per-node limits (default) |
+
+#### `simple`
+
+The default when no `node_configs` are configured (or explicitly selected).
+Target workers = `ceil(idle_tasks / batch_size)`, clamped to
+[`min_workers`, `max_workers`]. All workers are identical and submitted with
+the single scheduler-level `submit_args` template.
+
+```yaml
+scheduler:
+  placement_strategy: simple
+  batch_size: 4
+  submit_args:
+    partition: defq
+```
+
+#### `node_aware`
 
 When `node_configs` is defined, the pool manager ignores `batch_size` and
 instead packs idle tasks into the minimum number of nodes, choosing from the
@@ -200,6 +225,7 @@ available node types based on resource requirements.
 
 ```yaml
 scheduler:
+  placement_strategy: node_aware
   node_configs:
     - name: small
       cpus: 4
@@ -219,16 +245,24 @@ nodes.
 Per-node resource requirements (`cpus-per-task`, `mem`, `gpus`) are injected
 into each worker's submit args automatically.
 
-#### Runtime-aware placement
+#### `runtime_aware`
 
-Node configs can optionally specify `time_hrs` or `time_min` to set a maximum
-walltime. Tasks whose `runtime_minutes` exceed the node's limit are placed on
-a different node type (or left unplaced if no type fits). The planner also
-prefers shorter-runtime nodes when capacity is equal, reserving longer queues
-for longer tasks.
+Runtime-aware placement (the default) matches tasks to node types by expected
+wall time, so long tasks don't get stuck in short debug queues. It extends
+`node_aware` with wall-time limits.
+
+Add `time_hrs` and/or `time_min` to a node config to set that node type's
+maximum wall time (`0` or unset means no limit). Each task's expected runtime
+is read from the `runtime_minutes` classad on the HTCondor job; add it in the
+job's submit description, e.g. `+runtime_minutes = 90`. Tasks whose runtime
+exceeds a node's limit are placed on a different node type (or left unplaced
+if no type fits). When packing several tasks onto one node, the longest task
+runtime must fit. The planner also prefers shorter-runtime nodes when capacity
+is equal, reserving longer queues for longer tasks.
 
 ```yaml
 scheduler:
+  placement_strategy: runtime_aware
   node_configs:
     - name: debug_gpu
       time_min: 30
@@ -247,8 +281,15 @@ scheduler:
       gpus: 4
 ```
 
-The runtime is injected into the sbatch job as `--time=HH:MM:00`. Example:
-`time_min: 90` → `--time=01:30:00`.
+The node runtime is injected into the sbatch job as `--time=HH:MM:00`.
+Example: `time_min: 90` → `--time=01:30:00`.
+
+> Note: `pool-manager test-strategy` reads the expected runtime from the
+> `runtime_minutes` field of each record in the sample JSON file (see
+> `examples/tasks_w_diff_runtime.json`).
+
+See `docs/scheduling-strategies.md` for how each strategy works and what it
+assumes.
 
 ### Metrics
 

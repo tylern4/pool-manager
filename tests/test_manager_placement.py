@@ -48,6 +48,7 @@ def make_config(node_configs=None, **overrides):
             worker_script=overrides.get("worker_script", "/fake/worker.sh"),
             node_configs=node_configs or [],
             submit_args={"account": "myproject"},
+            placement_strategy=overrides.get("placement_strategy", "runtime_aware"),
         ),
         scaling=policy,
     )
@@ -66,6 +67,41 @@ class TestManagerPlacement:
         mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
         assert mgr._has_node_configs is True
         assert len(mgr._planner._node_configs) == 1
+
+    def test_simple_strategy_ignores_node_configs(self, mock_scheduler, mock_work_queue):
+        ncs = [NodeConfig(name="small", cpus=4, memory_mb=8192)]
+        cfg = make_config(node_configs=ncs, placement_strategy="simple")
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        assert mgr._has_node_configs is False
+        assert mgr._planner._node_configs == []
+        assert mgr._planner._runtime_aware is False
+
+    def test_node_aware_strategy_disables_runtime_matching(self, mock_scheduler, mock_work_queue):
+        ncs = [NodeConfig(name="short", cpus=128, memory_mb=262144, runtime_minutes=30)]
+        cfg = make_config(node_configs=ncs, placement_strategy="node_aware")
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        assert mgr._has_node_configs is True
+        assert mgr._planner._runtime_aware is False
+        plan = mgr._planner.plan_for_tasks(
+            [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=90)]
+        )
+        assert len(plan) == 1
+        assert plan[0].node_config.name == "short"
+
+    def test_runtime_aware_strategy_matches_wall_time(self, mock_scheduler, mock_work_queue):
+        ncs = [NodeConfig(name="short", cpus=128, memory_mb=262144, runtime_minutes=30)]
+        cfg = make_config(node_configs=ncs, placement_strategy="runtime_aware")
+        mgr = PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
+        assert mgr._planner._runtime_aware is True
+        plan = mgr._planner.plan_for_tasks(
+            [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=90)]
+        )
+        assert plan == []
+
+    def test_unknown_placement_strategy_raises(self, mock_scheduler, mock_work_queue):
+        cfg = make_config(placement_strategy="mystery")
+        with pytest.raises(ValueError, match="Unknown placement_strategy"):
+            PoolManager(config=cfg, work_queue=mock_work_queue, scheduler=mock_scheduler)
 
     def test_start_workers_simple_no_configs(self, mock_scheduler, mock_work_queue, tmp_path):
         script = tmp_path / "worker.sh"

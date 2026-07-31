@@ -1,174 +1,223 @@
-# Pool Manager Scheduling Strategies
+# Pool Manager Placement Strategies
 
-## Current Strategy: Elastic Bin-Packing
+The pool manager bridges **HTCondor** (work queue of idle jobs/tasks) with **HPC
+schedulers** (Slurm, PBS, HTCondor REST). Its core loop runs on a configurable
+`poll_interval`:
 
-### Architecture Overview
-
-The pool manager bridges **HTCondor** (work queue of idle jobs/tasks) with **HPC schedulers** (Slurm, PBS, HTCondor REST, local). Its core loop runs on a configurable `poll_interval`:
-
-1. **Poll** HTCondor for idle tasks via `work_queue.list_idle()` — returns a list of `TaskResources` (cpus, memory_mb, gpus) per idle job.
+1. **Poll** HTCondor for idle tasks via `work_queue.list_idle()` — returns a
+   list of `TaskResources` (cpus, memory_mb, gpus, runtime_minutes, job_status)
+   per idle job.
 2. **Plan** how many HPC workers to start via `PlacementPlanner.plan_for_tasks()`.
-3. **Scale up** by submitting worker scripts to the HPC scheduler (`sbatch`, `qsub`, etc.) with per-node resource args.
+3. **Scale up** by submitting worker scripts to the HPC scheduler (`sbatch`,
+   `qsub`, etc.) with per-node resource args.
 4. **Reconcile** active scheduler jobs against internal tracking.
 5. **Scale down** by signalling excess workers with `SIGTERM` (graceful drain).
 
-### Two Modes
+## Selecting a strategy
 
-#### Simple Mode (no `node_configs`)
+Placement is chosen with `scheduler.placement_strategy` in the config file:
 
-- `batch_size` controls how many idle tasks a single worker processes.
-- Target workers = `ceil(idle_tasks / batch_size)`, clamped to [`min_workers`, `max_workers`].
-- All workers are identical, submitted with a single `submit_args` template.
-- Used when tasks are homogeneous or resource requirements are unknown.
+```yaml
+scheduler:
+  placement_strategy: runtime_aware  # simple | node_aware | runtime_aware
+```
 
-#### Node-Aware Mode (`node_configs` defined)
+| Strategy | Config value | Uses `node_configs` | Uses wall-time limits |
+|----------|--------------|:-------------------:|:---------------------:|
+| Batch-based scaling | `simple` | no (ignored) | no |
+| Resource bin-packing | `node_aware` | yes | no |
+| Runtime-aware packing | `runtime_aware` (default) | yes | yes |
 
-- **Goal**: Minimize the number of HPC nodes needed to cover all idle tasks.
-- **Algorithm**: Greedy bin-packing — sort node types by total capacity descending (`cpus × memory_mb × max(gpus, 1)`). For each node type, compute max tasks that fit per node, pack as many nodes as needed, fall through to smaller types.
-- **Task placement (`plan_for_tasks`)**: First-fit decreasing (FFD) — sort tasks by resource size descending, place each into the first node with sufficient remaining capacity.
-- **GPU affinity**: GPU-requiring tasks skip GPU-less nodes; CPU-only tasks skip GPU nodes unless no other option.
-- **Per-node submit args**: Each `NodeConfig` carries optional `submit_args` injected into the scheduler submission (`--cpus-per-task`, `--mem`, `--gpus`).
-
-### Scaling Decisions
-
-| Decision | Mechanism |
-|---|---|
-| When to add workers | `active < target` && cooldown elapsed |
-| When to remove workers | `active > target` && cooldown elapsed |
-| Which workers to drain | Highest-capacity nodes first (reverse of placement order), preferring excess per node type |
-| Anti-flapping | Independent `scale_up_cooldown` / `scale_down_cooldown` timers (default 30 s / 60 s) |
-| Graceful shutdown | SIGTERM workers, wait `drain_timeout`, force-cancel leftovers |
-| State recovery | On startup, `list_active()` recovers tracked jobs from the scheduler |
-
-### Strengths
-
-- **Resource-proportional**: Workers request exactly the resources they need per node.
-- **Minimal node count**: Bin-packing reduces HPC allocation footprint.
-- **Backend-agnostic**: Works with Slurm (subprocess, REST, SFAPI), PBS, local, HTCondor REST.
-- **Graceful drain**: Workers drain in-place rather than being killed mid-task.
-
-### Limitations
-
-- **Reactive only**: Scales in response to backlog, not ahead of it. No prediction.
-- **No queue awareness**: Ignores scheduler queue depth, wait times, or backfill windows.
-- **Single-policy**: One planner applies across all node types; no per-queue strategy.
-- **No preemption or priority**: All tasks and workers are treated equally.
-- **No cost modelling**: Does not consider allocation charge rates or node cost.
+All strategies clamp the target to `[scaling.min_workers, scaling.max_workers]`
+and share the same scale-up/scale-down cooldowns, drain, and shutdown logic.
 
 ---
 
-## Alternative Strategies
+## 1. `simple` — batch-based scaling
 
-### 1. Best-Fit Decreasing (BFD)
+### How it works
 
-Place each task into the node that leaves the **least remaining capacity** after packing.
+- Target workers = `ceil(idle_tasks / batch_size)`, clamped to
+  `[min_workers, max_workers]`.
+- Every worker is identical and submitted with the scheduler-level
+  `submit_args` template (job name suffix `default`).
+- `node_configs` are ignored even if present in the config.
 
-- **Trade-off**: Better bin packing than FFD (fewer nodes) at higher computational cost.
-- **When useful**: Scenarios where node allocations are expensive or scarce.
-- **Cost**: O(n × m) per planning cycle vs. O(n log n + n × m) for the current FFD.
+```yaml
+scaling:
+  batch_size: 4
+  min_workers: 0
+  max_workers: 16
 
-### 2. Worst-Fit / Spread Strategy
+scheduler:
+  placement_strategy: simple
+  submit_args:
+    partition: defq
+    account: myproject
+```
 
-Place each task into the node with the **most remaining capacity**.
+### What it assumes
 
-- **Trade-off**: Spreads load evenly across nodes, reducing fragmentation at the cost of more nodes.
-- **When useful**: If nodes can be shared with other users/processes, spreading avoids hot spots.
-- **Downside**: Increases total node count (and cost).
-
-### 3. Throughput-Optimized: Many Small Nodes
-
-Prefer many small node allocations over fewer large ones.
-
-- **Rationale**: Smaller HPC jobs often start faster (less queue wait, more backfill opportunities, fit in more partitions). Increases task parallelism.
-- **When useful**: High-throughput workloads with many small, independent tasks. Long queue wait times for large allocations on the scheduler.
-- **Downside**: More scheduler jobs to manage, higher per-job overhead.
-
-### 4. Throughput-Optimized: Few Large Nodes (Current)
-
-Prefer fewer large nodes to maximise tasks-per-allocation.
-
-- **Rationale**: Lower per-job overhead, better utilisation, fewer scheduler submissions.
-- **When useful**: Queue wait times are low, or large allocations are as fast as small ones.
-- **Downside**: Single large job can be queued longer; failure removes more capacity.
-
-### 5. Queue-Wait-Aware Scheduling
-
-Query the scheduler's queue depth or estimated wait time before choosing node types.
-
-- **Strategy**: If large-node queue depth is high, fall through to smaller node types even if packing is suboptimal. Conversely, if small-node queue is congested, submit larger batches.
-- **When useful**: HPC centres with heterogeneous queue wait times across partitions/QOS levels.
-- **Implementation**: Poll `squeue --format=%P,%T | ...` or equivalent to estimate per-partition wait.
-- **Downside**: Extra API calls; wait time estimation is heuristic.
-
-### 6. Backfill-Optimised Packing
-
-Submit workers with short wall-time limits or lower priority to exploit scheduler backfill windows.
-
-- **Strategy**: Set `--time=00:30:00` on some workers so they fit into backfill slots. Re-submit if they get killed.
-- **When useful**: Scheduler supports backfill and queue is busy.
-- **Trade-off**: Workers may be preempted, requiring restart logic.
-
-### 7. Preemptible / Spot / Low-Priority Workers
-
-Use the cheapest allocation class available (e.g. `--qos=low`, `--partition=spot`).
-
-- **Strategy**: Bulk of workers on preemptible/low QoS; keep a small reserve of high-priority nodes as insurance.
-- **When useful**: Scheduler offers preemptible/spot pricing with priority preemption.
-- **Trade-off**: Workers can be killed at any time; work must be restartable.
-
-### 8. Predictive / Proactive Scaling
-
-Start workers **before** tasks arrive based on historical patterns.
-
-- **Strategy**: Track inflow rate; use a moving average or simple linear regression to predict near-future idle count. Scale up to predicted demand during cooldown.
-- **When useful**: Workloads with periodic or predictable spikes (e.g., daily cron, workflow DAG stages).
-- **Risk**: Over-provisioning if prediction is wrong.
-- **Implementation**: Add a `predictor` module that feeds `idle_count * fudge_factor` into the target calculation.
-
-### 9. Plateau / Holdover Strategy
-
-Keep a buffer of workers running during transient dips in idle count.
-
-- **Strategy**: Instead of scaling down immediately when `idle < target`, hold workers for N ticks. Only scale down if idle count stays below threshold.
-- **When useful**: Workloads with high variance between poll intervals (bursty). Prevents thrashing.
-- **Current approximation**: The scale-down cooldown timer serves a similar purpose, but a count-based buffer is more direct.
-
-### 10. Cost-Optimised: Cheapest-Fit
-
-Sort node types by cost (e.g. SU/hour) instead of capacity.
-
-- **Strategy**: Cheapest nodes first; only spill to expensive nodes when cheap capacity is exhausted.
-- **When useful**: Charging models differ per node type (e.g. GPU nodes cost 2× CPU nodes).
-- **Trade-off**: May use more nodes total, but lower total cost.
-
-### 11. Priority-Aware / Multi-Policy
-
-Assign different placement strategies per task priority or class.
-
-- **Strategy**: High-priority tasks get first-class nodes (fast queue, dedicated); low-priority tasks fill backfill/preemptible slots.
-- **When useful**: Multi-tenant pools, mixed workloads (urgent vs. best-effort).
-- **Implementation**: Classify tasks by label/owner/project; apply different `PlacementPlanner` per class.
-
-### 12. Hybrid: Reserved + On-Demand
-
-Maintain a base fleet of cheap/reserved nodes (e.g. via standing Slurm allocations) and burst overflow onto on-demand/preemptible nodes.
-
-- **Strategy**: `min_workers` runs on reserved capacity; excess spills to on-demand with separate config.
-- **When useful**: Guaranteed minimum throughput with elastic overflow.
-- **Implementation**: Two `PlacementPlanner` instances chained: reserved first, then overflow.
-
-### 13. Load-Aware Dynamic Batch Size
-
-Adjust `batch_size` based on system load instead of a fixed value.
-
-- **Strategy**: When the scheduler queue is deep, increase `batch_size` (more tasks per worker, fewer submissions). When shallow, decrease it.
-- **When useful**: Variable scheduler load; want to reduce submission overhead during congestion.
+- Tasks are homogeneous, or their individual resource requirements are unknown
+  or unimportant.
+- A single worker can process up to `batch_size` idle tasks before draining.
+- No differentiation between node types is needed (no CPU/GPU/memory tiers,
+  no queue/partition choice per workload).
+- All nodes are equally reachable — queue wait time does not depend on node
+  type.
 
 ---
 
-## Decision Matrix
+## 2. `node_aware` — resource bin-packing
 
-| Goal | Best Strategy | Trade-off |
+### How it works
+
+- The planner packs idle tasks into the **minimum number of nodes** chosen
+  from `scheduler.node_configs`.
+- Node configs are sorted by total capacity descending
+  (`cpus × memory × max(gpus, 1)`), with `priority` taking precedence.
+- **Task placement** uses first-fit decreasing: tasks are sorted by resource
+  size descending and placed into the first node with sufficient remaining
+  capacity (`plan_for_tasks`).
+- **GPU affinity**: GPU-requiring tasks skip GPU-less nodes; CPU-only tasks
+  skip GPU nodes unless no other option exists.
+- Per-node resource requirements (`cpus-per-task`, `mem`, `gpus`) and any
+  per-node `submit_args` are injected into each worker submission, overriding
+  scheduler-level defaults.
+- `batch_size` is ignored; tasks-per-node is derived from node capacity.
+
+```yaml
+scheduler:
+  placement_strategy: node_aware
+  node_configs:
+    - name: small
+      cpus: 4
+      memory_mb: 8000
+      gpus: 0
+    - name: large
+      cpus: 16
+      memory_mb: 64000
+      gpus: 0
+```
+
+### What it assumes
+
+- `node_configs` accurately describe the available node types (CPU count,
+  memory, GPU count) and that each is actually reachable.
+- Task resource requests (`RequestCpus`, `RequestMemory`, `RequestGpus`) reflect
+  true demand — a worker running a task gets exactly what the task asked for.
+- Queue wait is comparable across node types; the planner always prefers the
+  largest nodes that fit, so if large allocations queue slowly, this strategy
+  can under-deliver (see alternative #3 below).
+- Tasks have no wall-time constraint — any task can run for as long as needed
+  on any node.
+
+---
+
+## 3. `runtime_aware` — runtime-aware packing (default)
+
+### How it works
+
+- Everything from `node_aware`, plus wall-time matching.
+- A node config may set `time_hrs` and/or `time_min`, which become that node
+  type's maximum wall time (`0`/unset = no limit).
+- Each task's expected runtime is read from the `runtime_minutes` classad on
+  the HTCondor job (set with `+runtime_minutes = 90` in the submit
+  description; missing = `0` = no constraint).
+- Tasks whose runtime exceeds a node's limit are placed on a longer-runtime
+  node type, or left unplaced if no type fits.
+- When several tasks share a node, the **longest** task's runtime must fit
+  within the node's limit.
+- When capacity is equal, the planner prefers shorter-runtime nodes, reserving
+  long queues for long tasks.
+- The node wall time is injected into the submission as
+  `--time=HH:MM:00` (e.g. `time_min: 90` → `--time=01:30:00`).
+
+```yaml
+scheduler:
+  placement_strategy: runtime_aware
+  node_configs:
+    - name: debug_gpu
+      time_min: 30
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+    - name: short_gpu
+      time_hrs: 12
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+    - name: gpu
+      time_hrs: 48
+      cpus: 128
+      memory_gb: 256
+      gpus: 4
+```
+
+### What it assumes
+
+- Jobs carry an accurate `runtime_minutes` estimate. An estimate shorter than
+  actual runtime means the scheduler kills the worker at the node wall time.
+- Node wall-time limits reflect real scheduler constraints (partition/QoS time
+  caps) and are enforceable via `--time`.
+- Longer queues actually accept the longest task; otherwise long tasks are left
+  unplaced and wait for the next tick.
+- Runtime is the dominant placement factor after capacity — costs, priority,
+  and queue wait are not modelled.
+
+---
+
+## Comparison
+
+| Question | `simple` | `node_aware` | `runtime_aware` |
+|---|---|---|---|
+| Target = `ceil(idle / batch_size)` | yes | no | no |
+| Uses `node_configs` | no | yes | yes |
+| Minimises node count | no | yes | yes |
+| GPU-aware placement | no | yes | yes |
+| Matches tasks to wall time | no | no | yes |
+| Injects per-node submit args | no | yes | yes |
+| Injects `--time` | no | no | yes (when set) |
+
+---
+
+## Alternative strategies (future work)
+
+The implemented strategies above are deliberately simple. Depending on the
+site, the following are reasonable extensions; none are currently wired to
+`placement_strategy`.
+
+1. **Best-Fit Decreasing (BFD)** — place each task into the node leaving the
+   least remaining capacity. Better packing than FFD at higher cost
+   (O(n × m) per cycle).
+2. **Worst-fit / spread** — place each task into the node with the most
+   remaining capacity. Balances load across nodes at the cost of more nodes.
+3. **Throughput-optimized: many small nodes** — prefer many small allocations
+   over fewer large ones; small jobs queue faster and backfill more easily.
+4. **Throughput-optimized: few large nodes** — the current `node_aware`
+   default; fewer scheduler jobs, better per-node utilization.
+5. **Queue-wait-aware** — query scheduler queue depth/estimated wait and fall
+   through node types when a partition is congested.
+6. **Backfill-optimised packing** — submit short-wall-time workers to exploit
+   backfill windows; re-submit if killed.
+7. **Preemptible / spot workers** — bulk of workers on low-QoS/preemptible
+   slots with a small reserved high-priority reserve.
+8. **Predictive scaling** — forecast near-future idle count from historical
+   inflow and scale before the backlog arrives.
+9. **Plateau / holdover** — keep a buffer of workers across transient dips to
+   avoid scale-down thrash.
+10. **Cost-optimised cheapest-fit** — sort node types by SU/hour instead of
+    capacity.
+11. **Priority-aware multi-policy** — classify tasks by label/owner/project
+    and run a different planner per class.
+12. **Hybrid reserved + on-demand** — `min_workers` on standing reserved
+    capacity, overflow onto on-demand/preemptible nodes.
+13. **Load-aware dynamic batch size** — adjust `batch_size` from the scheduler
+    queue depth instead of a fixed value.
+
+## Decision matrix
+
+| Goal | Best strategy | Trade-off |
 |---|---|---|
 | Minimise node count | BFD or current FFD | Higher planning cost (BFD) |
 | Maximise throughput | Many small nodes + backfill | More scheduler jobs to manage |

@@ -21,7 +21,12 @@ from pool_manager.metrics import (
     start_metrics_server,
     update_metrics,
 )
-from pool_manager.placement import Placement, PlacementPlanner, TaskResources
+from pool_manager.placement import (
+    Placement,
+    PlacementPlanner,
+    TaskResources,
+    resolve_placement_strategy,
+)
 from pool_manager.scheduler import (
     HTCondorRESTAPIBackend,
     PBSSubprocessBackend,
@@ -115,14 +120,18 @@ class PoolManager:
         self._policy = config.scaling
 
         nc = config.scheduler.node_configs
+        ncs, runtime_aware = resolve_placement_strategy(
+            config.scheduler.placement_strategy, nc if nc else None
+        )
         self._planner = PlacementPlanner(
-            node_configs=nc if nc else None,
+            node_configs=ncs,
             task_resources=self._policy.task_resources,
             batch_size=self._policy.batch_size,
             max_workers=self._policy.max_workers,
             min_workers=self._policy.min_workers,
+            runtime_aware=runtime_aware,
         )
-        self._has_node_configs = bool(nc)
+        self._has_node_configs = bool(ncs)
 
         self._running = True
         self._tracked: dict[str, JobInfo] = {}

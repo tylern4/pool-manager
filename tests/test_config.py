@@ -14,6 +14,24 @@ class TestConfig:
         assert cfg.scaling.min_workers == 0
         assert cfg.scaling.max_workers == 16
 
+    def test_parses_placement_strategy(self):
+        yaml_content = """
+scheduler:
+  placement_strategy: node_aware
+"""
+        with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            cfg = Config.from_file(path)
+            assert cfg.scheduler.placement_strategy == "node_aware"
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_placement_strategy_default_runtime_aware(self):
+        cfg = Config()
+        assert cfg.scheduler.placement_strategy == "runtime_aware"
+
     def test_from_file_defaults_when_missing(self):
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write("")

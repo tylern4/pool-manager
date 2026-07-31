@@ -8,7 +8,7 @@ from loguru import logger
 from pool_manager.config import Config
 from pool_manager.log import setup_logging
 from pool_manager.manager import PoolManager, _make_scheduler, _make_work_queue
-from pool_manager.placement import PlacementPlanner, TaskResources
+from pool_manager.placement import PlacementPlanner, TaskResources, resolve_placement_strategy
 from pool_manager.tui import run_tui
 
 app = typer.Typer(
@@ -117,12 +117,14 @@ def test_strategy(
             )
         )
 
+    ncs, runtime_aware = resolve_placement_strategy(cfg.scheduler.placement_strategy, ncs)
     planner = PlacementPlanner(
-        node_configs=ncs if ncs else None,
+        node_configs=ncs,
         task_resources=policy.task_resources,
         batch_size=policy.batch_size,
         max_workers=policy.max_workers,
         min_workers=policy.min_workers,
+        runtime_aware=runtime_aware,
     )
 
     placements = planner.plan_for_tasks(tasks)
@@ -135,7 +137,8 @@ def test_strategy(
 
     typer.echo(f"Tasks: {len(tasks)}")
     nc_list = ", ".join(n.name for n in ncs) if ncs else "none"
-    typer.echo(f"Node configs: {len(ncs)} ({nc_list})")
+    typer.echo(f"Node configs: {len(ncs or [])} ({nc_list})")
+    typer.echo(f"Placement strategy: {cfg.scheduler.placement_strategy}")
     target_info = ""
     if ncs:
         target_info = f" (max={policy.max_workers}, min={policy.min_workers})"
