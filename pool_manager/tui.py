@@ -13,7 +13,12 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from pool_manager.config import Config
 from pool_manager.manager import _make_scheduler, _make_work_queue
-from pool_manager.placement import Placement, PlacementPlanner, TaskResources
+from pool_manager.placement import (
+    Placement,
+    PlacementPlanner,
+    TaskResources,
+    resolve_placement_strategy,
+)
 from pool_manager.scheduler.base import JobInfo, JobState, SchedulerBackend, parse_config_name
 from pool_manager.work_queue.base import WorkQueue
 
@@ -216,12 +221,17 @@ class PoolManagerTUI(App):
         except Exception as e:
             logger.warning("Failed to create work queue backend: {}", e)
 
+        nc = self.config.scheduler.node_configs or None
+        ncs, runtime_aware = resolve_placement_strategy(
+            self.config.scheduler.placement_strategy, nc
+        )
         self._planner = PlacementPlanner(
-            node_configs=self.config.scheduler.node_configs or None,
+            node_configs=ncs,
             task_resources=self.config.scaling.task_resources,
             batch_size=self.config.scaling.batch_size,
             max_workers=self.config.scaling.max_workers,
             min_workers=self.config.scaling.min_workers,
+            runtime_aware=runtime_aware,
         )
 
     def compose(self) -> ComposeResult:

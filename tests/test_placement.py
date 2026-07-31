@@ -1,6 +1,12 @@
+import pytest
 from loguru import logger
 
-from pool_manager.placement import NodeConfig, PlacementPlanner, TaskResources
+from pool_manager.placement import (
+    NodeConfig,
+    PlacementPlanner,
+    TaskResources,
+    resolve_placement_strategy,
+)
 
 
 class TestTargetSizeWithoutConfigs:
@@ -586,3 +592,43 @@ class TestPlanRuntimeAware:
         logger.remove()
         placements = p.plan_for_tasks(tasks)
         assert placements == []
+
+
+class TestResolvePlacementStrategy:
+    def test_simple_drops_node_configs(self):
+        ncs = [NodeConfig(name="small", cpus=4, memory_mb=8192)]
+        assert resolve_placement_strategy("simple", ncs) == (None, False)
+
+    def test_node_aware_keeps_configs_no_runtime(self):
+        ncs = [NodeConfig(name="small", cpus=4, memory_mb=8192)]
+        assert resolve_placement_strategy("node_aware", ncs) == (ncs, False)
+
+    def test_runtime_aware_keeps_configs_with_runtime(self):
+        ncs = [NodeConfig(name="small", cpus=4, memory_mb=8192)]
+        assert resolve_placement_strategy("runtime_aware", ncs) == (ncs, True)
+
+    def test_unknown_strategy_raises(self):
+        with pytest.raises(ValueError, match="Unknown placement_strategy"):
+            resolve_placement_strategy("mystery", [])
+
+    def test_runtime_aware_false_ignores_wall_time(self):
+        nc = [NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=30)]
+        p = PlacementPlanner(node_configs=nc, runtime_aware=False)
+        tasks = [TaskResources(cpus=1, memory_mb=1024, runtime_minutes=120)]
+        placements = p.plan_for_tasks(tasks)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "short"
+
+    def test_plan_ignores_wall_time_when_not_runtime_aware(self):
+        nc = [
+            NodeConfig(name="short", cpus=4, memory_mb=8192, runtime_minutes=30),
+            NodeConfig(name="long", cpus=4, memory_mb=8192, runtime_minutes=120),
+        ]
+        p = PlacementPlanner(
+            node_configs=nc,
+            task_resources=TaskResources(cpus=1, memory_mb=1024, runtime_minutes=120),
+            runtime_aware=False,
+        )
+        placements = p.plan(2)
+        assert len(placements) == 1
+        assert placements[0].node_config.name == "short"

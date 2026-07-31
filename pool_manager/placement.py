@@ -6,6 +6,26 @@ from loguru import logger
 
 from pool_manager.scheduler.base import NodeConfig
 
+PLACEMENT_STRATEGIES = ("simple", "node_aware", "runtime_aware")
+
+
+def resolve_placement_strategy(
+    strategy: str, node_configs: list[NodeConfig] | None
+) -> tuple[list[NodeConfig] | None, bool]:
+    """Map a placement_strategy name to ``(node_configs, runtime_aware)``."""
+    match strategy:
+        case "simple":
+            return None, False
+        case "node_aware":
+            return node_configs, False
+        case "runtime_aware":
+            return node_configs, True
+        case _:
+            raise ValueError(
+                f"Unknown placement_strategy: {strategy!r} "
+                f"(expected one of {', '.join(PLACEMENT_STRATEGIES)})"
+            )
+
 
 @dataclass
 class TaskResources:
@@ -31,12 +51,14 @@ class PlacementPlanner:
         batch_size: int = 1,
         max_workers: int = 16,
         min_workers: int = 0,
+        runtime_aware: bool = True,
     ):
         self._node_configs = node_configs or []
         self._task_resources = task_resources or TaskResources()
         self._batch_size = batch_size
         self._max_workers = max_workers
         self._min_workers = min_workers
+        self._runtime_aware = runtime_aware
 
     def target_size(self, idle_count: int) -> int:
         if not self._node_configs:
@@ -71,7 +93,11 @@ class PlacementPlanner:
             nc
             for nc in self._node_configs
             if (nc.gpus > 0) == (t.gpus > 0)
-            and (nc.runtime_minutes == 0 or t.runtime_minutes <= nc.runtime_minutes)
+            and (
+                not self._runtime_aware
+                or nc.runtime_minutes == 0
+                or t.runtime_minutes <= nc.runtime_minutes
+            )
         ] or self._node_configs
 
         sorted_configs = sorted(
@@ -79,7 +105,7 @@ class PlacementPlanner:
             key=lambda n: (
                 n.priority,
                 -(n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1)),
-                n.runtime_minutes,
+                n.runtime_minutes if self._runtime_aware else 0,
             ),
         )
 
@@ -185,7 +211,7 @@ class PlacementPlanner:
             key=lambda n: (
                 n.priority,
                 -(n.cpus * max(n.memory_mb, 1) * max(n.gpus, 1)),
-                n.runtime_minutes,
+                n.runtime_minutes if self._runtime_aware else 0,
             ),
         )
 
@@ -201,7 +227,7 @@ class PlacementPlanner:
             placed = False
 
             for nc, task_list in nodes:
-                if self._tasks_fit_on_node(nc, task_list + [task]):
+                if self._tasks_fit_on_node(nc, task_list + [task], self._runtime_aware):
                     task_list.append(task)
                     placed = True
                     break
@@ -223,7 +249,7 @@ class PlacementPlanner:
             for nc in sorted_configs:
                 if task.gpus == 0 and nc.gpus > 0:
                     continue
-                if self._tasks_fit_on_node(nc, [task]):
+                if self._tasks_fit_on_node(nc, [task], self._runtime_aware):
                     nodes.append((nc, [task]))
                     placed = True
                     break
@@ -250,7 +276,9 @@ class PlacementPlanner:
         return placements
 
     @staticmethod
-    def _tasks_fit_on_node(node_config: NodeConfig, tasks: list[TaskResources]) -> bool:
+    def _tasks_fit_on_node(
+        node_config: NodeConfig, tasks: list[TaskResources], runtime_aware: bool = True
+    ) -> bool:
         total_cpus = sum(t.cpus for t in tasks)
         total_mem = sum(t.memory_mb for t in tasks)
         total_gpus = sum(t.gpus for t in tasks)
@@ -264,7 +292,11 @@ class PlacementPlanner:
         if total_gpus > node_config.gpus:
             return False
         max_runtime = max(t.runtime_minutes for t in tasks)
-        if node_config.runtime_minutes > 0 and max_runtime > node_config.runtime_minutes:
+        if (
+            runtime_aware
+            and node_config.runtime_minutes > 0
+            and max_runtime > node_config.runtime_minutes
+        ):
             return False
         return True
 
