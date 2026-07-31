@@ -1,6 +1,6 @@
 # pool-manager
 
-Bridges an HTCondor work queue to an HPC scheduler (Slurm, PBS, or local).
+Bridges an HTCondor work queue to an HPC scheduler (Slurm, PBS, or HTCondor).
 The pool manager polls HTCondor for idle jobs, computes how many worker nodes
 are needed (optionally using node-aware bin-packing), and submits workers to
 the HPC cluster. Workers drain gracefully when demand drops.
@@ -49,14 +49,14 @@ pip install -e ".[rest,dev]"
 Configuration is written in YAML. By default the daemon looks for
 `pool-manager.yaml` in the current directory.
 
-### Minimal config (local, for testing)
+### Minimal config
 
 ```yaml
 work_queue:
   backend: condor_subprocess
 
 scheduler:
-  backend: local_subprocess
+  backend: slurm_subprocess
   worker_script: /path/to/worker.sh
 
 scaling:
@@ -97,7 +97,6 @@ Select one of these `backend` values:
 | `slurm_rest` | REST API | Slurm with `slurmrestd` |
 | `slurm_sfapi` | NERSC SFAPI | Perlmutter (NERSC) |
 | `pbs_subprocess` | `qsub`/`qdel`/`qstat` | PBS/Torque clusters (ALCF) |
-| `local_subprocess` | local `Popen` | Testing / development |
 | `htcondor_rest` | HTCondor REST | HTCondor as scheduler |
 
 #### Slurm examples
@@ -377,6 +376,6 @@ uv run ruff format --check
 
 ## See also
 
-- `examples/` — example configs for SLURM, PBS, local, and sample test data
+- `examples/` — example configs for SLURM, PBS, and sample test data
 - `PLAN.md` — architecture and design decisions
 - `AGENTS.md` — incremental development log

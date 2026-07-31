@@ -44,7 +44,7 @@ def make_config(node_configs=None, **overrides):
         log_level="DEBUG",
         work_queue=WorkQueueConfig(backend="condor_subprocess"),
         scheduler=SchedulerConfig(
-            backend="local_subprocess",
+            backend="slurm_subprocess",
             worker_script=overrides.get("worker_script", "/fake/worker.sh"),
             node_configs=node_configs or [],
             submit_args={"account": "myproject"},
@@ -583,7 +583,7 @@ class TestMakeFunctions:
             work_queue=WorkQueueConfig(
                 backend="condor_subprocess", schedd_name="schedd.example.com"
             ),
-            scheduler=SchedulerConfig(backend="local_subprocess"),
+            scheduler=SchedulerConfig(backend="slurm_subprocess"),
         )
         wq = _make_work_queue(cfg)
         assert wq.name() == "condor_subprocess(schedd=schedd.example.com)"
@@ -591,7 +591,7 @@ class TestMakeFunctions:
     def test_make_work_queue_condor_rest(self):
         cfg = Config(
             work_queue=WorkQueueConfig(backend="condor_rest", rest_url="http://example.com"),
-            scheduler=SchedulerConfig(backend="local_subprocess"),
+            scheduler=SchedulerConfig(backend="slurm_subprocess"),
         )
         wq = _make_work_queue(cfg)
         assert "condor_rest" in wq.name()
@@ -599,7 +599,7 @@ class TestMakeFunctions:
     def test_make_work_queue_unknown_backend(self):
         cfg = Config(
             work_queue=WorkQueueConfig(backend="unknown"),
-            scheduler=SchedulerConfig(backend="local_subprocess"),
+            scheduler=SchedulerConfig(backend="slurm_subprocess"),
         )
         with pytest.raises(ValueError, match="Unknown work_queue backend"):
             _make_work_queue(cfg)
@@ -608,7 +608,7 @@ class TestMakeFunctions:
     def test_make_work_queue_condor_python_fallback(self):
         cfg = Config(
             work_queue=WorkQueueConfig(backend="condor_python"),
-            scheduler=SchedulerConfig(backend="local_subprocess"),
+            scheduler=SchedulerConfig(backend="slurm_subprocess"),
         )
         wq = _make_work_queue(cfg)
         assert "condor_subprocess" in wq.name()
@@ -648,11 +648,6 @@ class TestMakeFunctions:
         sched = _make_scheduler(cfg)
         assert sched is not None
 
-    def test_make_scheduler_local_subprocess(self):
-        cfg = Config(scheduler=SchedulerConfig(backend="local_subprocess"))
-        sched = _make_scheduler(cfg)
-        assert sched is not None
-
     def test_make_scheduler_htcondor_rest(self):
         cfg = Config(
             scheduler=SchedulerConfig(
@@ -682,7 +677,7 @@ class TestMakeFunctions:
     def test_make_work_queue_condor_python_with_htcondor(self):
         cfg = Config(
             work_queue=WorkQueueConfig(backend="condor_python"),
-            scheduler=SchedulerConfig(backend="local_subprocess"),
+            scheduler=SchedulerConfig(backend="slurm_subprocess"),
         )
         wq = _make_work_queue(cfg)
         assert "condor_python" in wq.name()

@@ -24,7 +24,6 @@ from pool_manager.metrics import (
 from pool_manager.placement import Placement, PlacementPlanner, TaskResources
 from pool_manager.scheduler import (
     HTCondorRESTAPIBackend,
-    LocalSubprocessBackend,
     PBSSubprocessBackend,
     SchedulerWrapper,
     SlurmRESTAPIBackend,
@@ -95,8 +94,6 @@ def _make_scheduler(cfg) -> SchedulerBackend:
             backend = PBSSubprocessBackend(
                 job_name_prefix=job_name_prefix, test_mode=sch.test_mode, user=user
             )
-        case "local_subprocess":
-            backend = LocalSubprocessBackend(test_mode=sch.test_mode)
         case "htcondor_rest":
             backend = HTCondorRESTAPIBackend(
                 url=sch.rest_url,

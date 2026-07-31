@@ -5,7 +5,6 @@ from pool_manager.scheduler.base import (
     SchedulerBackend,
 )
 from pool_manager.scheduler.htcondor_rest import HTCondorRESTAPIBackend
-from pool_manager.scheduler.local_subprocess import LocalSubprocessBackend
 from pool_manager.scheduler.pbs_subprocess import PBSSubprocessBackend
 from pool_manager.scheduler.slurm_rest import SlurmRESTAPIBackend
 from pool_manager.scheduler.slurm_sfapi import SlurmSFAPIBackend
@@ -23,5 +22,4 @@ __all__ = [
     "SlurmRESTAPIBackend",
     "SlurmSFAPIBackend",
     "PBSSubprocessBackend",
-    "LocalSubprocessBackend",
 ]
