@@ -339,6 +339,47 @@ The TUI displays:
 
 Press `q` to quit, `r` to refresh.
 
+## Container image
+
+A multi-stage `Dockerfile` builds a slim image with the `rest` and `sfapi`
+extras installed (enabling the `slurm_rest`, `condor_rest`, `htcondor_rest`,
+and `slurm_sfapi` backends). Subprocess backends (`slurm_subprocess`,
+`pbs_subprocess`, `condor_subprocess`) work when their CLIs are mounted into
+the container. The `htcondor` extra (for `condor_python`) is intentionally not
+included because it bundles Condor libraries and adds significant size.
+
+Images are built and pushed to the GitHub Container Registry by the
+`.github/workflows/docker-build.yml` workflow:
+
+- `main` → `ghcr.io/tylern4/pool-manager:latest` and `...:sha-<commit>`
+- `v*` tags → `...:X.Y.Z`, `...:X.Y`, `...:X`
+- pull requests → build only, nothing pushed
+
+### Running
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/tylern4/pool-manager:latest
+
+# Run with a mounted config (the default config path is /app/pool-manager.yaml)
+docker run --rm \
+  -v /path/to/pool-manager.yaml:/app/pool-manager.yaml:ro \
+  ghcr.io/tylern4/pool-manager
+
+# Expose the Prometheus metrics endpoint
+docker run --rm -p 9090:9090 \
+  -v /path/to/pool-manager.yaml:/app/pool-manager.yaml:ro \
+  ghcr.io/tylern4/pool-manager
+
+# Override the subcommand or config path
+docker run --rm \
+  -v /path/to/config.yaml:/etc/pool-manager/config.yaml:ro \
+  ghcr.io/tylern4/pool-manager tui -c /etc/pool-manager/config.yaml
+```
+
+If you use a subprocess backend, mount the scheduler's CLI binaries into the
+container and reference them in the config (or ensure they are on `PATH`).
+
 ## Usage
 
 ### Daemon
