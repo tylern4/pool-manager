@@ -27,7 +27,7 @@ pool-manager = "pool_manager.__main__:main"
 package = true
 
 [tool.uv.sources]
-htcondor-rest = { git = "https://github.com/tylern4/condor_rest.git", rev = "64dbcc0" }
+htcondor-rest = { git = "https://github.com/tylern4/condor_rest.git", rev = "de15b4d" }
 
 [tool.ruff]
 target-version = "py313"
