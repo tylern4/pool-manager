@@ -9,16 +9,21 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+# git is required to fetch the htcondor-rest dependency from its git source.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first so their layer can be cached independently
 # of the application source.
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --extra rest --extra sfapi
+    uv sync --no-install-project --extra rest --extra sfapi
 
 # Install the project itself.
 COPY pool_manager ./pool_manager
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --extra rest --extra sfapi
+    uv sync --extra rest --extra sfapi
 
 FROM python:3.12-slim-bookworm AS runtime
 
