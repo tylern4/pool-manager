@@ -27,7 +27,7 @@ work_queue:
 
 # HPC scheduler configuration
 scheduler:
-  backend: slurm_subprocess # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess | htcondor_rest
+  backend: slurm_subprocess # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess
   worker_script: /path/to/htcondor_worker.sh
   rest_url: ""
   rest_token: ""

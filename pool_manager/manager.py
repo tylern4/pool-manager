@@ -28,7 +28,6 @@ from pool_manager.placement import (
     resolve_placement_strategy,
 )
 from pool_manager.scheduler import (
-    HTCondorRESTAPIBackend,
     PBSSubprocessBackend,
     SchedulerWrapper,
     SlurmRESTAPIBackend,
@@ -98,13 +97,6 @@ def _make_scheduler(cfg) -> SchedulerBackend:
         case "pbs_subprocess":
             backend = PBSSubprocessBackend(
                 job_name_prefix=job_name_prefix, test_mode=sch.test_mode, user=user
-            )
-        case "htcondor_rest":
-            backend = HTCondorRESTAPIBackend(
-                url=sch.rest_url,
-                token=sch.rest_token,
-                owner=user,
-                job_name_prefix=job_name_prefix,
             )
         case _:
             raise ValueError(f"Unknown scheduler backend: {sch.backend}")

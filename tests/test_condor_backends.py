@@ -9,11 +9,6 @@ subprocess/httpx.
 from unittest.mock import patch
 
 from pool_manager.placement import TaskResources
-from pool_manager.scheduler.htcondor_rest import (
-    HTCondorRESTAPIBackend,
-    _parse_walltime_minutes,
-    _translate_submit_args,
-)
 from pool_manager.work_queue.condor_rest import CondorRESTAPIBackend
 from pool_manager.work_queue.condor_subprocess import CondorSubprocessBackend
 
@@ -174,96 +169,3 @@ class TestCondorRESTAPIBackend:
     def test_name(self):
         backend = CondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
         assert "htcondor:8080" in backend.name()
-
-
-class TestHTCondorRESTAPISchedulerBackend:
-    def test_submit(self):
-        with patch("pool_manager.scheduler.htcondor_rest.CondorClient") as mock_client:
-            mock_client.return_value.submit.return_value = {
-                "cluster": 456,
-                "first_proc": 0,
-                "num_procs": 1,
-            }
-            backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="test-token")
-            job_id = backend.submit("/fake/worker.sh", {"cpus-per-task": "1"})
-            assert job_id == "456"
-            payload = mock_client.return_value.submit.call_args.args[0]
-            assert payload["executable"] == "/fake/worker.sh"
-            assert payload["request_cpus"] == "1"
-
-    def test_submit_translates_resources(self):
-        with patch("pool_manager.scheduler.htcondor_rest.CondorClient") as mock_client:
-            mock_client.return_value.submit.return_value = {"cluster": 789}
-            backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
-            backend.submit(
-                "/fake/worker.sh",
-                {
-                    "job-name": "htcondor_worker_small",
-                    "cpus-per-task": "4",
-                    "mem": "8000M",
-                    "gpus": "1",
-                    "time": "00:30:00",
-                    "partition": "debug",
-                },
-            )
-            payload = mock_client.return_value.submit.call_args.args[0]
-            assert payload["request_cpus"] == "4"
-            assert payload["request_memory"] == "8000M"
-            assert payload["request_gpus"] == "1"
-            assert payload["runtime_minutes"] == "30"
-            assert "job-name" not in payload
-            assert "partition" not in payload
-            assert payload["executable"] == "/fake/worker.sh"
-
-    def test_cancel(self):
-        with patch("pool_manager.scheduler.htcondor_rest.CondorClient") as mock_client:
-            backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
-            backend.cancel("456")
-            mock_client.return_value.remove.assert_called_once_with(job_id="456")
-
-    def test_list_active(self):
-        mock_jobs = [
-            {"ClusterId": 1, "JobStatus": 1},
-            {"ClusterId": 2, "JobStatus": 2},
-            {"ClusterId": 3, "JobStatus": 3},
-            {"ClusterId": 4, "JobStatus": 4},
-            {"ClusterId": 5, "JobStatus": 5},
-        ]
-        with patch("pool_manager.scheduler.htcondor_rest.CondorClient") as mock_client:
-            mock_client.return_value.get_queue.return_value = mock_jobs
-            backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
-            active = backend.list_active()
-            ids = [j.job_id for j in active]
-            assert "1" in ids
-            assert "2" in ids
-            assert "5" in ids
-            assert "3" not in ids
-            assert "4" not in ids
-
-    def test_list_active_empty(self):
-        with patch("pool_manager.scheduler.htcondor_rest.CondorClient") as mock_client:
-            mock_client.return_value.get_queue.return_value = []
-            backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
-            assert backend.list_active() == []
-
-    def test_signal_calls_remove(self):
-        with patch("pool_manager.scheduler.htcondor_rest.CondorClient") as mock_client:
-            backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
-            backend.signal("456", "SIGTERM")
-            mock_client.return_value.remove.assert_called_once_with(job_id="456")
-
-    def test_name(self):
-        backend = HTCondorRESTAPIBackend(url="http://htcondor:8080", token="tok")
-        assert "htcondor:8080" in backend.name()
-
-    def test_parse_walltime_minutes(self):
-        assert _parse_walltime_minutes("00:30:00") == 30
-        assert _parse_walltime_minutes("08:00:00") == 480
-        assert _parse_walltime_minutes("120") == 120
-        assert _parse_walltime_minutes("bogus") == 0
-
-    def test_translate_submit_args_passthrough(self):
-        translated = _translate_submit_args(
-            {"request_cpus": "2", "request_memory": "4096", "environment": "FOO=1"}
-        )
-        assert translated == {"request_cpus": "2", "request_memory": "4096", "environment": "FOO=1"}

@@ -27,13 +27,12 @@ The entire system is built on pluggable abstract base classes so any component (
   │  - RESTAPIBackend     │               │
   └──────────────────────┘               │
                                           ▼
-                             ┌─────────────────────────────┐
-                              │ SlurmSubprocessBackend       │
-                              │ SlurmRESTAPIBackend          │
-                              │ SlurmSFAPIBackend            │
-                              │ PBSSubprocessBackend         │
-                              │ HTCondorRESTAPIBackend       │
-                             └─────────────────────────────┘
+                              ┌─────────────────────────────┐
+                               │ SlurmSubprocessBackend       │
+                               │ SlurmRESTAPIBackend          │
+                               │ SlurmSFAPIBackend            │
+                               │ PBSSubprocessBackend         │
+                              └─────────────────────────────┘
 ```
 
 ## Abstract Base Classes
@@ -82,7 +81,6 @@ class SchedulerBackend(ABC):
 | `SlurmRESTAPIBackend(SchedulerBackend)` | Slurm REST API v0.0.38+ | HTTP-based job management |
 | `SlurmSFAPIBackend(SchedulerBackend)` | NERSC SFAPI | Perlmutter (NERSC) |
 | `PBSSubprocessBackend(SchedulerBackend)` | `qsub`/`qdel`/`qstat` | PBS/Torque CLI |
-| `HTCondorRESTAPIBackend(SchedulerBackend)` | HTCondor REST API | HTCondor as scheduler |
 
 A `SchedulerWrapper(SchedulerBackend)` provides simple delegation for logging and indirection without changing the backend interface.
 
@@ -166,7 +164,6 @@ class SlurmSubprocessBackend(SchedulerBackend): ...
 class SlurmRESTAPIBackend(SchedulerBackend): ...
 class SlurmSFAPIBackend(SchedulerBackend): ...
 class PBSSubprocessBackend(SchedulerBackend): ...
-class HTCondorRESTAPIBackend(SchedulerBackend): ...
 ```
 
 ## Pool Manager Config (`pool-manager.yaml`)
@@ -185,7 +182,7 @@ work_queue:
   # Backend-specific options (e.g. schedd_name, constraint, rest_url, token)
 
 scheduler:
-  backend: slurm_subprocess  # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess | htcondor_rest
+  backend: slurm_subprocess  # slurm_subprocess | slurm_rest | slurm_sfapi | pbs_subprocess
   worker_script: /path/to/htcondor_worker.sh
   submit_args:
     partition: defq
@@ -223,7 +220,6 @@ pool-manager/
 │       ├── slurm_rest.py
 │       ├── slurm_sfapi.py
 │       ├── pbs_subprocess.py
-│       └── htcondor_rest.py
 ├── pool-manager.yaml        # config file
 ├── pool-manager.service     # systemd unit
 ├── README.md
@@ -250,7 +246,6 @@ pool-manager/
   - `SlurmRESTAPIBackend` — HTTP client for Slurm REST API
   - `SlurmSFAPIBackend` — NERSC SFAPI for Perlmutter
   - `PBSSubprocessBackend` — `qsub`/`qdel`/`qstat`
-  - `HTCondorRESTAPIBackend` — HTCondor REST API
   - `SchedulerWrapper` — delegation wrapper
 
 - [x] **4. Implement config loading (`Config`)**
