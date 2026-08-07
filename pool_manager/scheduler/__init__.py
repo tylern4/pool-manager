@@ -4,7 +4,6 @@ from pool_manager.scheduler.base import (
     NodeConfig,
     SchedulerBackend,
 )
-from pool_manager.scheduler.htcondor_rest import HTCondorRESTAPIBackend
 from pool_manager.scheduler.pbs_subprocess import PBSSubprocessBackend
 from pool_manager.scheduler.slurm_rest import SlurmRESTAPIBackend
 from pool_manager.scheduler.slurm_sfapi import SlurmSFAPIBackend
@@ -17,7 +16,6 @@ __all__ = [
     "SchedulerWrapper",
     "JobInfo",
     "JobState",
-    "HTCondorRESTAPIBackend",
     "SlurmSubprocessBackend",
     "SlurmRESTAPIBackend",
     "SlurmSFAPIBackend",

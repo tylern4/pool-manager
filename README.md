@@ -27,7 +27,7 @@ pip install -e .
 
 | Extra | Provides | Backends enabled |
 |-------|----------|------------------|
-| `[rest]` | `httpx` | `slurm_rest`, `condor_rest`, `htcondor_rest` |
+| `[rest]` | `httpx` | `slurm_rest`, `condor_rest` |
 | `[htcondor]` | `htcondor` (Python bindings) | `condor_python` |
 | `[sfapi]` | `sfapi_client` | `slurm_sfapi` (NERSC) |
 | `[dev]` | `pytest`, `mypy`, `ruff` | testing & linting |
@@ -97,7 +97,6 @@ Select one of these `backend` values:
 | `slurm_rest` | REST API | Slurm with `slurmrestd` |
 | `slurm_sfapi` | NERSC SFAPI | Perlmutter (NERSC) |
 | `pbs_subprocess` | `qsub`/`qdel`/`qstat` | PBS/Torque clusters (ALCF) |
-| `htcondor_rest` | HTCondor REST | HTCondor as scheduler |
 
 #### Slurm examples
 
@@ -342,8 +341,8 @@ Press `q` to quit, `r` to refresh.
 ## Container image
 
 A multi-stage `Dockerfile` builds a slim image with the `rest` and `sfapi`
-extras installed (enabling the `slurm_rest`, `condor_rest`, `htcondor_rest`,
-and `slurm_sfapi` backends). Subprocess backends (`slurm_subprocess`,
+extras installed (enabling the `slurm_rest`, `condor_rest`, and `slurm_sfapi`
+backends). Subprocess backends (`slurm_subprocess`,
 `pbs_subprocess`, `condor_subprocess`) work when their CLIs are mounted into
 the container. The `htcondor` extra (for `condor_python`) is intentionally not
 included because it bundles Condor libraries and adds significant size.

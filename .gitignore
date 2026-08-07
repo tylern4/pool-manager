@@ -5,4 +5,8 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 pool-manager.log
+.env
 .coverage
+
+# uv lock file is intentionally not committed (deps resolved fresh)
+uv.lock

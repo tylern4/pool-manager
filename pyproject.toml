@@ -2,7 +2,7 @@
 name = "pool-manager"
 version = "0.1.0"
 description = "HTCondor queue → HPC scheduler pool bridge"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "pyyaml>=6.0",
     "sfapi-client>=0.5.0",
@@ -11,13 +11,14 @@ dependencies = [
     "textual>=0.47",
     "typer>=0.12",
     "svg-py>=1.10.0",
+    "htcondor-rest",
 ]
 
 [project.optional-dependencies]
 htcondor = ["htcondor>=10.0"]
 rest = ["httpx>=0.25"]
 sfapi = ["sfapi_client>=0.5"]
-dev = ["pytest>=7", "pytest-cov>=5", "mypy>=1", "ruff>=0.1"]
+dev = ["pytest>=7", "pytest-cov>=5", "mypy>=1", "ruff==0.16.2"]
 
 [project.scripts]
 pool-manager = "pool_manager.__main__:main"
@@ -25,8 +26,11 @@ pool-manager = "pool_manager.__main__:main"
 [tool.uv]
 package = true
 
+[tool.uv.sources]
+htcondor-rest = { git = "https://github.com/tylern4/condor_rest.git", rev = "64dbcc0" }
+
 [tool.ruff]
-target-version = "py310"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.format]
@@ -44,7 +48,7 @@ dev = [
     "pytest>=7",
  "pytest-cov>=5",
  "mypy>=1",
- "ruff>=0.1",
+ "ruff==0.16.2",
  "pre-commit>=4.6.0",
 ]
 rest = ["httpx>=0.25"]

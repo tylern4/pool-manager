@@ -14,6 +14,7 @@ class WorkQueueConfig:
     schedd_name: str = ""
     constraint: str = ""
     rest_url: str = ""
+    rest_token: str = ""
 
 
 @dataclass
@@ -88,6 +89,7 @@ class Config:
                 schedd_name=wk.get("schedd_name", ""),
                 constraint=wk.get("constraint", ""),
                 rest_url=wk.get("rest_url", ""),
+                rest_token=wk.get("rest_token", ""),
             ),
             scheduler=SchedulerConfig(
                 backend=sch.get("backend", "slurm_subprocess"),

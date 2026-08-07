@@ -1,7 +1,7 @@
 try:
-    import httpx
+    from htcondor_rest import CondorClient
 except ImportError:
-    httpx = None
+    CondorClient = None
 
 from loguru import logger
 
@@ -12,40 +12,29 @@ from pool_manager.work_queue.base import CondorBackend
 class CondorRESTAPIBackend(CondorBackend):
     def __init__(self, url: str, token: str = ""):
         self._url = url.rstrip("/")
-        self._token = token
+        self._client = (
+            CondorClient(base_url=self._url, token=token)
+            if token
+            else CondorClient(base_url=self._url)
+        )
 
     def count_idle(self, constraint: str = "") -> int:
         return len(self.list_idle(constraint=constraint))
 
     def list_idle(self, constraint: str = "") -> list[TaskResources]:
-        headers = {}
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-
-        params: dict[str, str] = {
-            "projection": "ClusterId,JobStatus,RequestCpus,RequestMemory,RequestGpus",
-        }
-        if constraint:
-            params["constraint"] = constraint
-        url = f"{self._url}/v1/jobs"
-
-        logger.debug("GET {} with params: {}", url, params)
-        resp = httpx.get(url, headers=headers, params=params, timeout=30)
-        logger.trace("REST response status={} body={}", resp.status_code, resp.text[:2000])
-
-        resp.raise_for_status()
-        data = resp.json()
-        jobs = data.get("data", data.get("jobs", []))
+        projection = "ClusterId,JobStatus,RequestCpus,RequestMemory,RequestGpus,runtime_minutes"
+        logger.debug("Querying HTCondor via htcondor-rest with constraint: {}", constraint)
+        jobs = self._client.get_queue(projection=projection, constraint=constraint or None)
         tasks = []
         for job in jobs:
             job = {k.lower(): v for k, v in job.items()}
             tasks.append(
                 TaskResources(
-                    cpus=float(job.get("requestcpus", 1)),
-                    memory_mb=int(job.get("requestmemory", 1024)),
-                    gpus=int(job.get("requestgpus", 0)),
-                    runtime_minutes=int(job.get("runtime_minutes", 0)),
-                    job_status=int(job.get("jobstatus", 0)),
+                    cpus=float(job.get("requestcpus", 1) or 1),
+                    memory_mb=int(job.get("requestmemory", 1024) or 1024),
+                    gpus=int(job.get("requestgpus", 0) or 0),
+                    runtime_minutes=int(job.get("runtime_minutes", 0) or 0),
+                    job_status=int(job.get("jobstatus", 0) or 0),
                 )
             )
         logger.debug("HTCondor REST idle count: {}", len(tasks))

@@ -684,17 +684,6 @@ class TestMakeFunctions:
         sched = _make_scheduler(cfg)
         assert sched is not None
 
-    def test_make_scheduler_htcondor_rest(self):
-        cfg = Config(
-            scheduler=SchedulerConfig(
-                backend="htcondor_rest",
-                rest_url="http://condor:8080",
-                rest_token="token123",
-            )
-        )
-        sched = _make_scheduler(cfg)
-        assert sched is not None
-
     def test_make_scheduler_unknown_backend(self):
         cfg = Config(scheduler=SchedulerConfig(backend="unknown"))
         with pytest.raises(ValueError, match="Unknown scheduler backend"):

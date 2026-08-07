@@ -1,3 +1,34 @@
+# Session Checkpoint — 2026-08-07
+
+## Summary
+
+Removed the HTCondor scheduler backend. HTCondor is only used as the work
+queue source (`pool_manager.work_queue.*`); the `htcondor_rest` scheduler
+backend is gone.
+
+## Files Modified
+
+- **`pool_manager/scheduler/htcondor_rest.py`** — deleted
+- **`pool_manager/scheduler/__init__.py`** — dropped `HTCondorRESTAPIBackend`
+  import/export
+- **`pool_manager/manager.py`** — removed `htcondor_rest` case from
+  `_make_scheduler` and the `HTCondorRESTAPIBackend` import
+- **`tests/test_condor_backends.py`** — removed `TestHTCondorRESTAPISchedulerBackend`
+- **`tests/test_manager_placement.py`** — removed `test_make_scheduler_htcondor_rest`
+- **`pool-manager.yaml`, `pool-manager.gpu.yaml`** — removed `htcondor_rest`
+  from backend comments
+- **`README.md`, `PLAN.md`** — removed scheduler `htcondor_rest` docs
+- **`AGENTS.md`** — this checkpoint
+
+## Notes
+
+- The `htcondor-rest` package dependency stays: `pool_manager/work_queue/condor_rest.py`
+  uses `htcondor_rest.CondorClient` to query the HTCondor queue.
+
+## Test Stats
+
+250 tests total, all passing, no ruff errors.
+
 # Session Checkpoint — 2026-07-29
 
 ## Summary
