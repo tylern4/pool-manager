@@ -7,3 +7,6 @@ __pycache__/
 pool-manager.log
 .env
 .coverage
+
+# uv lock file is intentionally not committed (deps resolved fresh)
+uv.lock
