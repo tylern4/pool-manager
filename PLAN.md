@@ -90,13 +90,12 @@ The core coordinator. Composes a `WorkQueue` + `SchedulerBackend`.
 
 ```python
 class PoolManager:
-    def __init__(self, config: Config, work_queue: WorkQueue,
-                 scheduler: SchedulerBackend): ...
+    def __init__(self, config: Config, work_queue: WorkQueue, scheduler: SchedulerBackend): ...
 
-    def run(self): ...         # main loop
-    def _tick(self): ...       # poll + reconcile + scale
-    def _scale(self): ...      # scale decision
-    def _drain(self): ...      # graceful drain protocol
+    def run(self): ...  # main loop
+    def _tick(self): ...  # poll + reconcile + scale
+    def _scale(self): ...  # scale decision
+    def _drain(self): ...  # graceful drain protocol
 ```
 
 ## Architecture Diagram
@@ -129,12 +128,18 @@ class CondorWorkQueue(WorkQueue):
     def count_idle(self) -> int:
         return self._backend.count_idle()
 
+
 class CondorBackend(ABC):
     @abstractmethod
     def count_idle(self) -> int: ...
 
+
 class CondorPythonBackend(CondorBackend): ...
+
+
 class CondorSubprocessBackend(CondorBackend): ...
+
+
 class CondorRESTAPIBackend(CondorBackend): ...
 ```
 
@@ -144,9 +149,12 @@ Same delegation pattern for `SchedulerWrapper` → backend:
 class SchedulerWrapper(SchedulerBackend):
     def __init__(self, backend: SchedulerBackend):
         self._backend = backend
+
     def submit(self, script_path, submit_args):
         return self._backend.submit(script_path, submit_args)
+
     # ... delegates cancel, list_active, signal, name
+
 
 class SchedulerBackend(ABC):
     @abstractmethod
@@ -160,9 +168,16 @@ class SchedulerBackend(ABC):
     @abstractmethod
     def name(self) -> str: ...
 
+
 class SlurmSubprocessBackend(SchedulerBackend): ...
+
+
 class SlurmRESTAPIBackend(SchedulerBackend): ...
+
+
 class SlurmSFAPIBackend(SchedulerBackend): ...
+
+
 class PBSSubprocessBackend(SchedulerBackend): ...
 ```
 

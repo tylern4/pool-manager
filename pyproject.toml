@@ -18,7 +18,7 @@ dependencies = [
 htcondor = ["htcondor>=10.0"]
 rest = ["httpx>=0.25"]
 sfapi = ["sfapi_client>=0.5"]
-dev = ["pytest>=7", "pytest-cov>=5", "mypy>=1", "ruff>=0.1"]
+dev = ["pytest>=7", "pytest-cov>=5", "mypy>=1", "ruff==0.16.2"]
 
 [project.scripts]
 pool-manager = "pool_manager.__main__:main"
@@ -48,7 +48,7 @@ dev = [
     "pytest>=7",
  "pytest-cov>=5",
  "mypy>=1",
- "ruff>=0.1",
+ "ruff==0.16.2",
  "pre-commit>=4.6.0",
 ]
 rest = ["httpx>=0.25"]
