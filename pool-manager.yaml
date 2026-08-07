@@ -23,6 +23,7 @@ work_queue:
   schedd_name: "" # leave empty for default schedd
   constraint: "" # classad expression (default: all jobs; e.g. "JobStatus == 1" for idle only)
   rest_url: "" # required for condor_rest backend
+  rest_token: "" # bearer token for the condor_rest backend (defaults to CONDOR_PASS)
 
 # HPC scheduler configuration
 scheduler:

@@ -1,3 +1,25 @@
+# Session Checkpoint — 2026-08-07
+
+## Summary
+
+Fixed `tests/test_condor_backends.py` after the HTCondor REST backend split into
+`pool_manager.work_queue.condor_rest` (task-backend) and
+`pool_manager.scheduler.htcondor_rest` (worker scheduler).
+
+## Files Modified
+
+- **`tests/test_condor_backends.py`**:
+  - Import `_parse_walltime_minutes` from `pool_manager.scheduler.htcondor_rest`
+  - Fixed patch targets: `TestHTCondorRESTAPISchedulerBackend` now patches
+    `pool_manager.scheduler.htcondor_rest.CondorClient` instead of the work_queue path
+  - Moved backend construction inside `with patch(...)` blocks so the mocked
+    `CondorClient` is used (previously the real client was created first and made
+    real HTTP calls during tests)
+
+## Test Stats
+
+260 tests total, all passing, no ruff errors.
+
 # Session Checkpoint — 2026-07-29
 
 ## Summary

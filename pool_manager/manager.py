@@ -57,7 +57,7 @@ def _make_work_queue(cfg) -> WorkQueue:
         case "condor_subprocess":
             backend = CondorSubprocessBackend(schedd_name=wk.schedd_name)
         case "condor_rest":
-            backend = CondorRESTAPIBackend(url=wk.rest_url)
+            backend = CondorRESTAPIBackend(url=wk.rest_url, token=wk.rest_token)
         case _:
             raise ValueError(f"Unknown work_queue backend: {wk.backend}")
 
